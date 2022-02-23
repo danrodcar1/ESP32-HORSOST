@@ -6,11 +6,9 @@
 #include <SimpleTimer.h> //repetitive tasks
 #include "esp_system.h" //watchdog
 #include "time.h"
-#include <NTPClient.h>
-#include <WiFiUdp.h>
-#include <AsyncTCP.h>
-#include <ESPAsyncWebServer.h>
-#include <AsyncElegantOTA.h>
+#include <HTTPUpdate.h>
+#include <HTTPClient.h>
+#include "build_defs.h"
 
 
 /**********************************************************************
@@ -20,14 +18,25 @@
 // ESP32  WiFi & UPDATE SERVER
 WiFiClient espClient;
 PubSubClient client(espClient);
-AsyncWebServer server(80);
-// Define NTP Client to get time
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP);
-// Variables to save date and time
-String formattedDate;
-String dayStamp;
-String timeStamp;
+const unsigned char FWVER[] =
+{
+  VERSION_MAJOR_INIT,
+  '.',
+  VERSION_MINOR_INIT,
+  '-', 'V', '-',
+  BUILD_YEAR_CH0, BUILD_YEAR_CH1, BUILD_YEAR_CH2, BUILD_YEAR_CH3,
+  '-',
+  BUILD_MONTH_CH0, BUILD_MONTH_CH1,
+  '-',
+  BUILD_DAY_CH0, BUILD_DAY_CH1,
+  'T',
+  BUILD_HOUR_CH0, BUILD_HOUR_CH1,
+  ':',
+  BUILD_MIN_CH0, BUILD_MIN_CH1,
+  ':',
+  BUILD_SEC_CH0, BUILD_SEC_CH1,
+  '\0'
+};
 
 char espID[32];
 String ESP32_ID;
@@ -77,17 +86,12 @@ void setup()
   connectToNetwork();
   client.setServer(MQTT_SERVER, 1883);
   client.setCallback(callback);
-
+  checkForUpdates();
   //init watchdog
   watchDogTimer = timerBegin(0, 80, true); //timer 0, div80
   timerAttachInterrupt(watchDogTimer, &watchDogInterrupt, true);
   timerAlarmWrite(watchDogTimer, WATCHDOG_TIMEOUT_S * 1000000, false);
   timerAlarmEnable(watchDogTimer);
-
-  // Initialize a NTPClient to get time
-  timeClient.begin();
-  timeClient.setTimeOffset(gmtOffset_sec);
-
 
   initSamplesArrays();
 
@@ -102,40 +106,17 @@ void setup()
 
 void loop()
 {
-  //readLocalTime();
   timerManager.run();
   if (!client.connected()) {
     reconnect();
   }
   client.loop();
-  AsyncElegantOTA.loop();
   watchDogRefresh();
 }
 
 /***********************************************************************
   OPERATIONAL FUNCTIONS
 ***********************************************************************/
-
-void readLocalTime()
-{
-  while (!timeClient.update()) {
-    Serial.println("Failed to obtain time");
-    timeClient.forceUpdate();
-  }
-  // The formattedDate comes with the following format:
-  // 2018-05-28T16:00:13Z
-  // We need to extract date and time
-  formattedDate = timeClient.getFormattedDate();
-
-  // Extract date
-  int splitT = formattedDate.indexOf("T");
-  dayStamp = formattedDate.substring(0, splitT);
-  // Extract time
-  timeStamp = formattedDate.substring(splitT + 1, formattedDate.length() - 1);
-  if (timeStamp == "00:00:00") {
-    rainCyclesCounter = 0; //reset the interrupt counter to 0 AT MIDNIGHT
-  }
-}
 
 void captureAndSendPartialSample() {
   shiftArrayToRight_ws(windSamples, WIND_SAMPLES_SIZE);
@@ -146,34 +127,7 @@ void captureAndSendPartialSample() {
   anemometerCyclesCounter = 0;//reset the partial interrupt counter to 0
   int windAngle = analogToAngleDirection(readADC_Avg(analogRead(WINDVANE_PIN)), windvaneADRefValues);
   windSamples[0] = {windCyclesPerSecond, windAngle, currentSampleMillis};
-  Serial.println(sendWindPartialSample(windSamples[0]).c_str());
-}
-
-String sendWindPartialSample(WindSample ws) {
-  DynamicJsonDocument jsonRoot(2048);
-  String jsonString;
-  JsonObject partialSample = jsonRoot.createNestedObject("partialSample");
-  partialSample["windSpeed"] = truncar(ws.windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 3);
-  partialSample["windAngle"] = ws.windAngle;
-  partialSample["sampleTime"] = ws.sampleMillis;
-  serializeJson(jsonRoot, jsonString);
-  return jsonString;
-}
-
-String sendFullSamples(SensorsSample * samples, int samplesToSend) {
-  for (int i = 0; i < samplesToSend; i++) {
-    DynamicJsonDocument jsonRoot(2048);
-    String jsonString;
-    JsonObject fullSample = jsonRoot.createNestedObject("fullSample");
-    fullSample["windSpeed"] = truncar(samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 3);
-    fullSample["windAngle"] = samples[i].windAngle;
-    fullSample["gustWind"] = truncar(samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 3);
-    fullSample["gustWindAngle"] = samples[i].gustAngle;
-    fullSample["rmm"] = samples[i].rainCyclesPerMinute * (float)RAIN_BUCKET_MM_PER_CYCLE;
-    fullSample["sampleTime"] = samples[i].sampleMillis;
-    serializeJson(jsonRoot, jsonString);
-    return jsonString;
-  }
+  client.publish(partialSample_topic, sendPartialSample(windSamples[0]).c_str(), true);
 }
 
 void captureAndSendMinuteSample() {
@@ -200,7 +154,41 @@ void captureAndSendMinuteSample() {
   lastMinuteSampleMillis = currentSampleMillis;
   shiftArrayToRight_ss(avgMinuteSamplesLog, WIND_AVG_MINUTE_LOG_SIZE);
   avgMinuteSamplesLog[0] = avgMinuteSample;
-  Serial.println(sendFullSamples(avgMinuteSamplesLog, 1).c_str());
+  client.publish(fullSample_topic, sendFullSamples(avgMinuteSamplesLog, 1).c_str(), true);
+}
+
+String sendPartialSample(WindSample ws) {
+  StaticJsonDocument<capacity> jsonRoot;
+  String jsonString;
+  jsonRoot["HW"] = "ESP32-DEVKITC-V4";
+  jsonRoot["ChipID"] = espID;
+  jsonRoot["fw_ver"] = FWVER;
+  JsonObject Wifi = jsonRoot.createNestedObject("WiFi");
+  Wifi["SSID"] = wifi_ssid;
+  Wifi["IP"] = WiFi.localIP().toString();;
+  Wifi["RSSI"] = WiFi.RSSI();
+  JsonObject partialSample = jsonRoot.createNestedObject("partialSample");
+  partialSample["windSpeed"] = truncar(ws.windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 3);
+  partialSample["windAngle"] = ws.windAngle;
+  partialSample["sampleTime"] = ws.sampleMillis;
+  serializeJson(jsonRoot, jsonString);
+  return jsonString;
+}
+
+String sendFullSamples(SensorsSample * samples, int samplesToSend) {
+  for (int i = 0; i < samplesToSend; i++) {
+    DynamicJsonDocument jsonRoot(2048);
+    String jsonString;
+    JsonObject fullSample = jsonRoot.createNestedObject("fullSample");
+    fullSample["windSpeed"] = truncar(samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 3);
+    fullSample["windAngle"] = samples[i].windAngle;
+    fullSample["gustWind"] = truncar(samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 3);
+    fullSample["gustWindAngle"] = samples[i].gustAngle;
+    fullSample["rmm"] = samples[i].rainCyclesPerMinute * (float)RAIN_BUCKET_MM_PER_CYCLE;
+    fullSample["sampleTime"] = samples[i].sampleMillis;
+    serializeJson(jsonRoot, jsonString);
+    return jsonString;
+  }
 }
 
 void initSamplesArrays() {
@@ -256,7 +244,6 @@ void connectToNetwork() {
   Serial.println("WiFi conectado");
   Serial.println("Direccion IP: ");
   Serial.println(WiFi.localIP());
-  startUpdateServer();
 }
 
 void reconnect() {
@@ -301,24 +288,7 @@ void callback(char* topic, byte* payload, unsigned int length)
   char message_buff[100];
 }
 
-String EspDataWifiSerialize (void)
-{
-  DynamicJsonDocument jsonRoot(2048);
-  String jsonString;
 
-  jsonRoot["ChipID"] = espID;
-  //jsonRoot["Uptime"] = TiempoPrograma;
-  JsonObject Wifi = jsonRoot.createNestedObject("WiFi");
-  Wifi["SSID"] = wifi_ssid;
-  char buffer_ip[] = "xxx.xxx.xxx.xxx";
-  IPAddress wifi_ip = WiFi.localIP();
-  wifi_ip.toString().toCharArray(buffer_ip, 16);
-  Wifi["IP"] = buffer_ip;
-  Wifi["RSSI"] = WiFi.RSSI();
-
-  serializeJson(jsonRoot, jsonString);
-  return jsonString;
-}
 
 /***********************************************************************
    INTERRUPT FUNCTIONS
@@ -444,12 +414,17 @@ float truncar (float num, int pos) {
   return numStr.toFloat();
 }
 
-void startUpdateServer() {
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
-    request->send(200, "text/plain", "Hi! I am ESP32.");
-  });
-
-  AsyncElegantOTA.begin(&server);    // Start ElegantOTA
-  server.begin();
-  Serial.println("HTTP server started");
+void checkForUpdates() {
+  Serial.println("Check FOTA...");
+  switch (httpUpdate.update(espClient, OTA_URL, HTTP_OTA_VERSION)) {
+    case HTTP_UPDATE_FAILED:
+      Serial.printf(" HTTP update failed: Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+      break;
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println(F(" El dispositivo ya está actualizado"));
+      break;
+    case HTTP_UPDATE_OK:
+      Serial.println(F(" OK"));
+      break;
+  }
 }

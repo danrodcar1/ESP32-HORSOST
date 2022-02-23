@@ -1,21 +1,32 @@
 /**********************************************************************
    CONFIGS.- WiFi & MQTT PROTOCOL
 ***********************************************************************/
-#define wifi_ssid "huerticawifi"
-#define wifi_password "4cc3sshu3rt1c4"
+//#define wifi_ssid "huerticawifi"
+//#define wifi_password "4cc3sshu3rt1c4"
 //#define wifi_ssid "JAZZTEL_Hpcy"
 //#define wifi_password "5hj735h55rfj"
+#define wifi_ssid "HortSost"
+#define wifi_password "9b11c2671e5b"
 
 #define ntpServer "pool.ntp.org"
 #define gmtOffset_sec 3600
 #define daylightOffset_sec 3600
 
-#define MQTT_SERVER         "huertociencias.uma.es"
-#define MQTT_PORT           8163
-#define MQTT_USER           "huerta"
-#define MQTT_PASSWORD       "accesohuertica"
+#define MQTT_SERVER         "192.168.141.12"//"huertociencias.uma.es"
+#define MQTT_PORT           1883//8163
+#define MQTT_USER           NULL//"huerta"
+#define MQTT_PASSWORD       NULL//"accesohuertica"
 #define MQTT_FINGERPRINT    "f6 59 59 a8 8d 75 86 07 ce a3 1a c3 93 3e 65 5f ae 72 99 45"
 
+#define OTA_URL "https://huertociencias.uma.es/esp8266-ota-update"
+#define HTTP_OTA_VERSION      String(__FILE__).substring(String(__FILE__).lastIndexOf('\\')+1) + ".doitESP32devkitV1" 
+#define VERSION_MAJOR 1
+#define VERSION_MINOR 0
+//#define __DEBUG__ false   //set to true for debug output, false for no debug ouput
+//#define Serial if(__DEBUG__)Serial
+
+
+#define capacity (4*JSON_OBJECT_SIZE(15))
 /**********************************************************************
    CONFIGS.- SENSORS
 ***********************************************************************/
@@ -55,4 +66,7 @@
 /**********************************************************************
   TOPICS FOR MQTT CONNECTION
 ***********************************************************************/
-#define conexion_topic "HortSost/TFG/ESPSens/conexion"
+#define conexion_topic "HortSost/ESP32/conexion"
+#define dataWiFi_topic "HortSost/ESP32"
+#define fullSample_topic "HortSost/ESP32/sample/full"
+#define partialSample_topic "HortSost/ESP32/info"
