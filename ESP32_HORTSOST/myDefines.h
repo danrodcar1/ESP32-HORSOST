@@ -18,7 +18,7 @@
 #define MQTT_PASSWORD       NULL//"accesohuertica"
 #define MQTT_FINGERPRINT    "f6 59 59 a8 8d 75 86 07 ce a3 1a c3 93 3e 65 5f ae 72 99 45"
 
-#define OTA_URL "https://huertociencias.uma.es/esp8266-ota-update"
+#define OTA_URL             "https://192.168.141.12:1880/esp8266-ota-update"
 #define HTTP_OTA_VERSION      String(__FILE__).substring(String(__FILE__).lastIndexOf('\\')+1) + ".doitESP32devkitV1" 
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 0
@@ -26,7 +26,7 @@
 //#define Serial if(__DEBUG__)Serial
 
 
-#define capacity (4*JSON_OBJECT_SIZE(15))
+#define capacity (3*JSON_OBJECT_SIZE(3))
 /**********************************************************************
    CONFIGS.- SENSORS
 ***********************************************************************/
@@ -67,6 +67,6 @@
   TOPICS FOR MQTT CONNECTION
 ***********************************************************************/
 #define conexion_topic "HortSost/ESP32/conexion"
-#define dataWiFi_topic "HortSost/ESP32"
+#define dataESP_topic "HortSost/ESP32"
 #define fullSample_topic "HortSost/ESP32/sample/full"
-#define partialSample_topic "HortSost/ESP32/info"
+#define partialSample_topic "HortSost/ESP32/info/sens"

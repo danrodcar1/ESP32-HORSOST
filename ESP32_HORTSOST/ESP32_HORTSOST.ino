@@ -100,6 +100,7 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(ANEMOMETER_PIN), countAnemometerCycles, FALLING);
   attachInterrupt(digitalPinToInterrupt(RAINGAUGE_PIN), countRainCycles, FALLING);
 
+  timerManager.setInterval(500, sendDataESP32); // Capture values each 10''
   timerManager.setInterval(WIND_SAMPLING_SECONDS * 1000, captureAndSendPartialSample); // Capture values each 10''
   timerManager.setInterval(10L * 60000L, captureAndSendMinuteSample); // Send values each 10'
 }
@@ -158,7 +159,18 @@ void captureAndSendMinuteSample() {
 }
 
 String sendPartialSample(WindSample ws) {
-  StaticJsonDocument<capacity> jsonRoot;
+  DynamicJsonDocument jsonRoot(2048);
+  String jsonString;
+  JsonObject partialSample = jsonRoot.createNestedObject("partialSample");
+  partialSample["windSpeed"] = truncar(ws.windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 2);
+  partialSample["windAngle"] = ws.windAngle;
+  partialSample["sampleTime"] = ws.sampleMillis;
+  serializeJson(jsonRoot, jsonString);
+  return jsonString;
+}
+
+void sendDataESP32() {
+  DynamicJsonDocument jsonRoot(2048);
   String jsonString;
   jsonRoot["HW"] = "ESP32-DEVKITC-V4";
   jsonRoot["ChipID"] = espID;
@@ -167,12 +179,8 @@ String sendPartialSample(WindSample ws) {
   Wifi["SSID"] = wifi_ssid;
   Wifi["IP"] = WiFi.localIP().toString();;
   Wifi["RSSI"] = WiFi.RSSI();
-  JsonObject partialSample = jsonRoot.createNestedObject("partialSample");
-  partialSample["windSpeed"] = truncar(ws.windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 3);
-  partialSample["windAngle"] = ws.windAngle;
-  partialSample["sampleTime"] = ws.sampleMillis;
   serializeJson(jsonRoot, jsonString);
-  return jsonString;
+  client.publish(dataESP_topic, jsonString.c_str(), true);
 }
 
 String sendFullSamples(SensorsSample * samples, int samplesToSend) {
@@ -180,9 +188,9 @@ String sendFullSamples(SensorsSample * samples, int samplesToSend) {
     DynamicJsonDocument jsonRoot(2048);
     String jsonString;
     JsonObject fullSample = jsonRoot.createNestedObject("fullSample");
-    fullSample["windSpeed"] = truncar(samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 3);
+    fullSample["windSpeed"] = truncar((samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR), 2);
     fullSample["windAngle"] = samples[i].windAngle;
-    fullSample["gustWind"] = truncar(samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 3);
+    fullSample["gustWind"] = truncar(samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 2);
     fullSample["gustWindAngle"] = samples[i].gustAngle;
     fullSample["rmm"] = samples[i].rainCyclesPerMinute * (float)RAIN_BUCKET_MM_PER_CYCLE;
     fullSample["sampleTime"] = samples[i].sampleMillis;
@@ -378,6 +386,8 @@ int analogToAngleDirection(int adInputValue, int * referenceValues) {
   return angle;
 }
 
+
+
 /**
   function to average angles using its cos and sin components,
   (averaging angles by its nominal value (180º, 350º, etc) wouldn't result in a meaningfull value
@@ -406,12 +416,19 @@ int meanAngle (int *angles, int size)
   }
 }
 
-float truncar (float num, int pos) {
-  String string = String(num);
-  unsigned int longitud = string.length();
-  float decimalLength = string.indexOf('.') + longitud;
-  String numStr = string.substring(0, decimalLength + pos);
-  return numStr.toFloat();
+//float truncar (float num, int pos) {
+//  String string = String(num);
+//  unsigned int longitud = string.length();
+//  float decimalLength = string.indexOf('.') + longitud;
+//  String numStr = string.substring(0, decimalLength + pos);
+//  return numStr.toFloat();
+//}
+
+float truncar( float in_value, int decimal_place )
+{
+  float multiplier = powf( 10.0f, decimal_place );
+  in_value = roundf( in_value * multiplier ) / multiplier;
+  return in_value;
 }
 
 void checkForUpdates() {
