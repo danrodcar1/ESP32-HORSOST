@@ -39,7 +39,6 @@ const unsigned char FWVER[] =
 };
 
 char espID[32];
-String ESP32_ID;
 
 hw_timer_t * watchDogTimer = NULL; //watchdog timer declaration
 SimpleTimer timerManager; //timer declaration
@@ -82,11 +81,13 @@ void watchDogRefresh();
 
 void setup()
 {
-  Serial.begin(115200); // Inicializamos el puerto serial
+  Serial.begin(115200);
   connectToNetwork();
-  client.setServer(MQTT_SERVER, 1883);
+  client.setServer(MQTT_SERVER, MQTT_PORT);
   client.setCallback(callback);
+  client.setBufferSize(512);
   checkForUpdates();
+
   //init watchdog
   watchDogTimer = timerBegin(0, 80, true); //timer 0, div80
   timerAttachInterrupt(watchDogTimer, &watchDogInterrupt, true);
@@ -100,7 +101,6 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(ANEMOMETER_PIN), countAnemometerCycles, FALLING);
   attachInterrupt(digitalPinToInterrupt(RAINGAUGE_PIN), countRainCycles, FALLING);
 
-  timerManager.setInterval(500, sendDataESP32); // Capture values each 10''
   timerManager.setInterval(WIND_SAMPLING_SECONDS * 1000, captureAndSendPartialSample); // Capture values each 10''
   timerManager.setInterval(10L * 60000L, captureAndSendMinuteSample); // Send values each 10'
 }
@@ -120,6 +120,12 @@ void loop()
 ***********************************************************************/
 
 void captureAndSendPartialSample() {
+  String clientId = "ESP32Client-";
+  uint32_t chipID = ESP.getEfuseMac();
+  clientId += String(chipID);
+  String topic_string = ("orchard/" + TYPE_NODE + "/" + clientId + "/data");                             // Select topic by ESP ID
+  const char* partialSample_topic = topic_string.c_str();
+  
   shiftArrayToRight_ws(windSamples, WIND_SAMPLES_SIZE);
   float prevSampleMillis = windSamples[1].sampleMillis;
   unsigned long currentSampleMillis = millis();
@@ -132,6 +138,12 @@ void captureAndSendPartialSample() {
 }
 
 void captureAndSendMinuteSample() {
+  String clientId = "ESP32Client-";
+  uint32_t chipID = ESP.getEfuseMac();
+  clientId += String(chipID);
+  String topic_string = ("orchard/" + TYPE_NODE + "/" + clientId + "/data");                             // Select topic by ESP ID
+  const char* fullSample_topic = topic_string.c_str();
+
   float prevSampleMillis = lastMinuteSampleMillis;
   unsigned long currentSampleMillis = millis();
   float elapsedSeconds = (float)(currentSampleMillis - prevSampleMillis) / (float)1000;
@@ -161,6 +173,10 @@ void captureAndSendMinuteSample() {
 String sendPartialSample(WindSample ws) {
   DynamicJsonDocument jsonRoot(2048);
   String jsonString;
+  JsonObject Wifi = jsonRoot.createNestedObject("WiFi");
+  Wifi["SSID"] = WIFI_SSID;
+  Wifi["IP"] = WiFi.localIP().toString();;
+  Wifi["RSSI"] = WiFi.RSSI();
   JsonObject partialSample = jsonRoot.createNestedObject("partialSample");
   partialSample["windSpeed"] = truncar(ws.windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 2);
   partialSample["windAngle"] = ws.windAngle;
@@ -169,18 +185,19 @@ String sendPartialSample(WindSample ws) {
   return jsonString;
 }
 
-void sendDataESP32() {
+void sendDataEspFW() {
+  String clientId = "ESP32Client-";
+  uint32_t chipID = ESP.getEfuseMac();
+  clientId += String(chipID);
+  String topic_string = ("orchard/" + TYPE_NODE + "/" + clientId);                             // Select topic by ESP ID
+  const char* dataESPFW_topic = topic_string.c_str();
   DynamicJsonDocument jsonRoot(2048);
   String jsonString;
   jsonRoot["HW"] = "ESP32-DEVKITC-V4";
   jsonRoot["ChipID"] = espID;
   jsonRoot["fw_ver"] = FWVER;
-  JsonObject Wifi = jsonRoot.createNestedObject("WiFi");
-  Wifi["SSID"] = wifi_ssid;
-  Wifi["IP"] = WiFi.localIP().toString();;
-  Wifi["RSSI"] = WiFi.RSSI();
   serializeJson(jsonRoot, jsonString);
-  client.publish(dataESP_topic, jsonString.c_str(), true);
+  client.publish(dataESPFW_topic, jsonString.c_str(), true);
 }
 
 String sendFullSamples(SensorsSample * samples, int samplesToSend) {
@@ -232,7 +249,7 @@ void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
   Serial.print("WiFi lost connection. Reason: ");
   Serial.println(info.disconnected.reason);
   Serial.println("Trying to Reconnect");
-  WiFi.begin(wifi_ssid, wifi_password);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
 void connectToNetwork() {
@@ -240,9 +257,9 @@ void connectToNetwork() {
   delay(10);
   Serial.println();
   Serial.print("Conectando a ");
-  Serial.println(wifi_ssid);
+  Serial.println(WIFI_SSID);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(wifi_ssid, wifi_password);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(200);
@@ -255,16 +272,18 @@ void connectToNetwork() {
 }
 
 void reconnect() {
+  String clientId = "ESP32Client-";
+  uint32_t chipID = ESP.getEfuseMac();
+  clientId += String(chipID);
+  clientId.toCharArray(espID, 32);
+  String topic_string = ("orchard/" + TYPE_NODE + "/" + clientId + "/connection");                             // Select topic by ESP ID
+  const char* conexion_topic = topic_string.c_str();
   // BUCLE DE CHECKING DE CONEXIÓN AL SERVICIO MQTT
   while (!client.connected()) {
     Serial.print("Intentando conectarse a MQTT...");
 
     // Generación del nombre del cliente en función de la dirección MAC y los ultimos 8 bits del contador temporal
-    String clientId = "ESP32Client-";
-    uint32_t chipID = ESP.getEfuseMac();
-    clientId += String(chipID);
-    ESP32_ID = clientId;
-    clientId.toCharArray(espID, 32);
+
     Serial.print("Conectando a ");
     Serial.print(MQTT_SERVER);
     Serial.print(" como ");
@@ -277,6 +296,7 @@ void reconnect() {
 
       // Publicamos el estado de la conexion en el topic
       client.publish(conexion_topic, "Online", true);
+      sendDataEspFW();
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
