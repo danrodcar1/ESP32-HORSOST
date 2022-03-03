@@ -177,10 +177,10 @@ String sendPartialSample(WindSample ws) {
   Wifi["SSID"] = WIFI_SSID;
   Wifi["IP"] = WiFi.localIP().toString();;
   Wifi["RSSI"] = WiFi.RSSI();
-  JsonObject partialSample = jsonRoot.createNestedObject("partialSample");
-  partialSample["windSpeed"] = truncar(ws.windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 2);
-  partialSample["windAngle"] = ws.windAngle;
-  partialSample["sampleTime"] = ws.sampleMillis;
+  JsonObject sampleRead = jsonRoot.createNestedObject("sampleRead");
+  sampleRead["windSpeed"] = truncar(ws.windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 2);
+  sampleRead["windAngle"] = ws.windAngle;
+  sampleRead["sampleTime"] = ws.sampleMillis;
   serializeJson(jsonRoot, jsonString);
   return jsonString;
 }
@@ -204,13 +204,13 @@ String sendFullSamples(SensorsSample * samples, int samplesToSend) {
   for (int i = 0; i < samplesToSend; i++) {
     DynamicJsonDocument jsonRoot(2048);
     String jsonString;
-    JsonObject fullSample = jsonRoot.createNestedObject("fullSample");
-    fullSample["windSpeed"] = truncar((samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR), 2);
-    fullSample["windAngle"] = samples[i].windAngle;
-    fullSample["gustWind"] = truncar(samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 2);
-    fullSample["gustWindAngle"] = samples[i].gustAngle;
-    fullSample["rmm"] = samples[i].rainCyclesPerMinute * (float)RAIN_BUCKET_MM_PER_CYCLE;
-    fullSample["sampleTime"] = samples[i].sampleMillis;
+    JsonObject sampleRead = jsonRoot.createNestedObject("sampleRead");
+    sampleRead["windSpeed"] = truncar((samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR), 2);
+    sampleRead["windAngle"] = samples[i].windAngle;
+    sampleRead["gustWind"] = truncar(samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 2);
+    sampleRead["gustWindAngle"] = samples[i].gustAngle;
+    sampleRead["rmm"] = samples[i].rainCyclesPerMinute * (float)RAIN_BUCKET_MM_PER_CYCLE;
+    sampleRead["sampleTime"] = samples[i].sampleMillis;
     serializeJson(jsonRoot, jsonString);
     return jsonString;
   }
