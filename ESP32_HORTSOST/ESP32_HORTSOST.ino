@@ -16,7 +16,7 @@
 ***********************************************************************/
 
 // ESP32  WiFi & UPDATE SERVER
-WiFiClient espClient;
+WiFiClientSecure espClient;
 PubSubClient client(espClient);
 const unsigned char FWVER[] =
 {
@@ -125,7 +125,7 @@ void captureAndSendPartialSample() {
   clientId += String(chipID);
   String topic_string = ("orchard/" + TYPE_NODE + "/" + clientId + "/data");                             // Select topic by ESP ID
   const char* partialSample_topic = topic_string.c_str();
-  
+
   shiftArrayToRight_ws(windSamples, WIND_SAMPLES_SIZE);
   float prevSampleMillis = windSamples[1].sampleMillis;
   unsigned long currentSampleMillis = millis();
@@ -292,6 +292,15 @@ void reconnect() {
     // Intentando conectar
     if (client.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD, conexion_topic, 2, true, "Offline", true)) {
       Serial.println("conectado");
+      // Check IOTfingerprint
+      boolean verified = espClient.verify(MQTT_FINGERPRINT, MQTT_SERVER);              // Check IOTfingerprint
+      if (verified)
+      {
+        Serial.println("Verified tls!");
+      } else
+      {
+        Serial.println("Unverified tls");
+      }
       // Nos suscribimos a los siguientes topics
 
       // Publicamos el estado de la conexion en el topic
