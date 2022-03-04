@@ -153,7 +153,7 @@ void captureAndSendMinuteSample() {
   unsigned long currentSampleMillis = millis();
   float elapsedSeconds = (float)(currentSampleMillis - prevSampleMillis) / (float)1000;
   float windCyclesPerSecond = (float)anemometerMinuteCyclesCounter / elapsedSeconds;
-  float anemometerCyclesCounterRegister = anemometerCyclesCounter;
+  float anemometerCyclesCounterRegister = anemometerMinuteCyclesCounter;
   int avgWindAngle = 0, gustAngle = 0;
   float gustCyclesPerSecond = 0;
 

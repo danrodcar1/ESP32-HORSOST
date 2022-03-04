@@ -29,7 +29,7 @@
 #define RAINGAUGE_PIN 34 //digital pin 34 (interrupt 1)
 #define WINDVANE_PIN 32 //ADC1_CH4
 
-#define DATA_SAMPLING_MINUTES 1L 
+#define DATA_SAMPLING_MINUTES 10L //send sensor data each 10'
 #define WIND_SAMPLING_SECONDS 10 //from 5 to 15 seconds would be recommended
 #define WIND_SAMPLES_SIZE 6 //this value MUST be 60secs/WIND_SAMPLING_SECONDS, eg. 60/6 => 10=WIND_SAMPLES_SIZE
 #define WIND_AVG_MINUTE_LOG_SIZE 18 //this MUST be equal or greater than 1 to store the current sample
