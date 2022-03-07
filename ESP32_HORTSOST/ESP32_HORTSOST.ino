@@ -282,8 +282,8 @@ void connectToNetwork() {
   Serial.println("Direccion IP: ");
   Serial.println(WiFi.localIP());
   // DESCOMENTAR CUANDO SE DESCOMENTE WIFISECURE!!
-  //  espClient.setInsecure();
-  //  espClient.setTimeout(12);
+//  espClient.setInsecure();
+//  espClient.setTimeout(12);
 }
 
 void reconnect() {

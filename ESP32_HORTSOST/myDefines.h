@@ -1,12 +1,10 @@
 /**********************************************************************
    CONFIGS.- WiFi & MQTT PROTOCOL
 ***********************************************************************/
-//#define WIFI_SSID           "huerticawifi"
-//#define WIFI_PASSWORD       "4cc3sshu3rt1c4"
-#define WIFI_SSID           "HortSost"
-#define WIFI_PASSWORD       "9b11c2671e5b"
+#define WIFI_SSID           "huerticawifi"
+#define WIFI_PASSWORD       "4cc3sshu3rt1c4"
 
-#define MQTT_SERVER         "192.168.141.12"//"huertociencias.uma.es"
+#define MQTT_SERVER         "10.10.10.10"//"huertociencias.uma.es"
 #define MQTT_PORT           1883//8163
 #define MQTT_USER           NULL//"huerta"
 #define MQTT_PASSWORD       NULL//"accesohuertica"
