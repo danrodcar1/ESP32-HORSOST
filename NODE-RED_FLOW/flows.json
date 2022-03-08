@@ -34,7 +34,7 @@
         "z": "dbb70c4e5bd29fca",
         "name": "",
         "group": "8bad9da88bafe3fe",
-        "order": 2,
+        "order": 1,
         "width": 0,
         "height": 0,
         "gtype": "gage",
@@ -60,7 +60,7 @@
         "type": "ui_text",
         "z": "dbb70c4e5bd29fca",
         "group": "8bad9da88bafe3fe",
-        "order": 3,
+        "order": 2,
         "width": 0,
         "height": 0,
         "name": "",
@@ -78,7 +78,7 @@
         "z": "dbb70c4e5bd29fca",
         "name": "",
         "group": "8bad9da88bafe3fe",
-        "order": 4,
+        "order": 3,
         "width": 0,
         "height": 0,
         "gtype": "compass",
@@ -463,8 +463,7 @@
         "mode": "link",
         "links": [
             "60f7ccc1400ae23e",
-            "76ab8bb08ea75fd4",
-            "aa5943c76f465d39"
+            "76ab8bb08ea75fd4"
         ],
         "x": 1075,
         "y": 440,
@@ -491,7 +490,7 @@
         "upsert": false,
         "multi": false,
         "operation": "delete",
-        "x": 360,
+        "x": 480,
         "y": 1400,
         "wires": []
     },
@@ -661,29 +660,6 @@
         "wires": []
     },
     {
-        "id": "6183d2566606193d",
-        "type": "ui_template",
-        "z": "dbb70c4e5bd29fca",
-        "group": "96c33b0d18edfb58",
-        "name": "",
-        "order": 5,
-        "width": "0",
-        "height": "0",
-        "format": "<style>\n.button {\n    text-align: center;\n    font: normal 15px Arial;\n    text-decoration: none;\n    background-color: #097479;\n    color: white;\n    padding: 8px 10px;\n    border: none;\n    border-radius: 15px;\n    box-shadow: 0 7px #999;\n    transition: all 0.5s;\n    cursor: pointer;\n    margin:5px;\n  }\n \n\n  .button:hover\n  {\n   background-color: #0b8f95;\n  }\n  \n  .button:active {\n  background-color: #214a4c;\n  box-shadow: 0 5px #666;\n  transform: translateY(4px);\n}\n\n</style>\n\n<script>\nvar value = {};\n// or overwrite value in your callback function ...\nthis.scope.action = function() { return value; }\n</script>\n\n<md-button ng-click=\"send({payload:action()})\" class=\"button\">Resetea la base de datos</md-button>\n",
-        "storeOutMessages": true,
-        "fwdInMessages": true,
-        "resendOnRefresh": false,
-        "templateScope": "local",
-        "className": "",
-        "x": 100,
-        "y": 1400,
-        "wires": [
-            [
-                "0eca0ad7df2b2a86"
-            ]
-        ]
-    },
-    {
         "id": "3dd7737164cc35c8",
         "type": "function",
         "z": "dbb70c4e5bd29fca",
@@ -761,7 +737,7 @@
         "order": 5,
         "width": "6",
         "height": "2",
-        "format": "<style>\n.button {\n    text-align: center;\n    font: normal 15px Arial;\n    text-decoration: none;\n    background-color: #097479;\n    color: white;\n    padding: 8px 10px;\n    border: none;\n    border-radius: 15px;\n    box-shadow: 0 7px #999;\n    transition: all 0.5s;\n    cursor: pointer;\n    margin:5px;\n  }\n \n\n  .button:hover\n  {\n   background-color: #0b8f95;\n  }\n  \n  .button:active {\n  background-color: #214a4c;\n  box-shadow: 0 5px #666;\n  transform: translateY(4px);\n}\n\n\n</style>\n<a href=\"http://10.10.10.10:1880/viento\" class=\"button\">Tendencia del viento</a>\n",
+        "format": "<style>\n.button {\n    text-align: center;\n    font: normal 15px Arial;\n    text-decoration: none;\n    background-color: #097479;\n    color: white;\n    padding: 8px 10px;\n    border: none;\n    border-radius: 15px;\n    box-shadow: 0 7px #999;\n    transition: all 0.5s;\n    cursor: pointer;\n    margin:5px;\n  }\n \n\n  .button:hover\n  {\n   background-color: #0b8f95;\n  }\n  \n  .button:active {\n  background-color: #214a4c;\n  box-shadow: 0 5px #666;\n  transform: translateY(4px);\n}\n\n\n</style>\n<a href=\"http://10.10.10.10:1880/viento\" class=\"button\">TENDENCIA DEL VIENTO</a>\n",
         "storeOutMessages": true,
         "fwdInMessages": true,
         "resendOnRefresh": false,
@@ -865,7 +841,7 @@
         "type": "ui_text",
         "z": "dbb70c4e5bd29fca",
         "group": "55cde78b37bb66cb",
-        "order": 3,
+        "order": 1,
         "width": 0,
         "height": 0,
         "name": "",
@@ -882,7 +858,7 @@
         "type": "ui_text",
         "z": "dbb70c4e5bd29fca",
         "group": "55cde78b37bb66cb",
-        "order": 4,
+        "order": 2,
         "width": 0,
         "height": 0,
         "name": "",
@@ -959,7 +935,7 @@
         "type": "ui_text",
         "z": "dbb70c4e5bd29fca",
         "group": "55cde78b37bb66cb",
-        "order": 6,
+        "order": 4,
         "width": 0,
         "height": 0,
         "name": "",
@@ -976,7 +952,7 @@
         "type": "ui_text",
         "z": "dbb70c4e5bd29fca",
         "group": "55cde78b37bb66cb",
-        "order": 7,
+        "order": 5,
         "width": 0,
         "height": 0,
         "name": "",
@@ -1011,7 +987,7 @@
         "type": "ui_text",
         "z": "dbb70c4e5bd29fca",
         "group": "55cde78b37bb66cb",
-        "order": 8,
+        "order": 6,
         "width": 0,
         "height": 0,
         "name": "",
@@ -1028,7 +1004,7 @@
         "type": "ui_text",
         "z": "dbb70c4e5bd29fca",
         "group": "55cde78b37bb66cb",
-        "order": 5,
+        "order": 3,
         "width": 0,
         "height": 0,
         "name": "",
@@ -1102,7 +1078,7 @@
         "type": "ui_text",
         "z": "dbb70c4e5bd29fca",
         "group": "55cde78b37bb66cb",
-        "order": 9,
+        "order": 7,
         "width": 0,
         "height": 0,
         "name": "",
@@ -1119,7 +1095,7 @@
         "type": "ui_text",
         "z": "dbb70c4e5bd29fca",
         "group": "55cde78b37bb66cb",
-        "order": 10,
+        "order": 8,
         "width": 0,
         "height": 0,
         "name": "",
@@ -1136,7 +1112,7 @@
         "type": "ui_text",
         "z": "dbb70c4e5bd29fca",
         "group": "55cde78b37bb66cb",
-        "order": 11,
+        "order": 9,
         "width": 0,
         "height": 0,
         "name": "",
@@ -1160,26 +1136,7 @@
         "y": 1220,
         "wires": [
             [
-                "0ca8240623b37446"
-            ]
-        ]
-    },
-    {
-        "id": "0ca8240623b37446",
-        "type": "function",
-        "z": "dbb70c4e5bd29fca",
-        "name": "",
-        "func": "var arrayagua=[];\nvar meses=[];\n  \nvar semana=[\"Do\", \"Lu\", \"Ma\", \"Mi\", \"Ju\", \"Vi\", \"Sá\"];\n\nvar resultado={\"payload\":[{\n        \"series\":[\"Cantidad de precipitaciones (mm)\"],\n        \"data\":[arrayagua],\n        \"labels\":meses\n    }]};\nnode.send(resultado);\n\n\n    for (var i = 0; i < msg.payload.length-1; i++)\n    {\n        arrayagua.push(msg.payload[i].total);\n        mes=msg.payload[i]._id.mes;\n        year=msg.payload[i]._id.year;\n        meses.push(mes + \"/\" + year);\n    } \n\nvar msg1 ={};\n\nmsg1.payload = [{\n        \"series\":[\"Cantidad de precipitaciones (mm)\"],\n        \"data\":[ arrayagua],\n        \"labels\":meses\n        }];\nreturn msg1 \n\n\n",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 680,
-        "y": 1220,
-        "wires": [
-            [
-                "40d85f4f885934ca"
+                "906c0577960ec458"
             ]
         ]
     },
@@ -1190,8 +1147,8 @@
         "name": "",
         "group": "2422315c3b9aa95a",
         "order": 2,
-        "width": "0",
-        "height": "0",
+        "width": 0,
+        "height": 0,
         "label": "Histórico precipitaciones por meses (último año)",
         "chartType": "bar",
         "legend": "true",
@@ -1208,7 +1165,7 @@
         "useOneColor": true,
         "useUTC": false,
         "colors": [
-            "#74bb60",
+            "#09858c",
             "#aec7e8",
             "#ff7f0e",
             "#2ca02c",
@@ -1221,7 +1178,7 @@
         "outputs": 1,
         "useDifferentColor": false,
         "className": "",
-        "x": 960,
+        "x": 1040,
         "y": 1220,
         "wires": [
             []
@@ -1232,7 +1189,7 @@
         "type": "function",
         "z": "dbb70c4e5bd29fca",
         "name": "último dato",
-        "func": "var desde;\nvar hasta;\nvar ahora = new Date();\nvar meses_historial = flow.get(\"meses\") || 1;\nhasta = ahora;\ndesde = new Date(hasta-86400000*31*meses_historial);\n\n\nmsg.payload=[\n    {\"$match\": { \"fecha\": { \"$gte\": desde,  \"$lte\": hasta} }},\n    {\n    \"$group\":\n    {\"_id\":{\"year\": { \"$year\": \"$fecha\" }, \"mes\": { \"$month\": \"$fecha\" }},\n    \"total\":{\"$sum\":\"$sampleRead.rmm\"}    \n    }},\n     {\"$sort\":{\"_id\":1}}\n    ];\nreturn msg;\n\n\n\n",
+        "func": "var desde;\nvar hasta;\nvar ahora = new Date();\nvar meses_historial = flow.get(\"meses\") || 1;\nhasta = ahora;\ndesde = new Date(hasta-86400000*30*meses_historial);\n\n\nmsg.payload=[\n    {\"$match\": { \"fecha\": { \"$gte\": desde,  \"$lte\": hasta} }},\n    {\n    \"$group\":\n    {\"_id\":{\"year\": { \"$year\": \"$fecha\" }, \"mes\": { \"$month\": \"$fecha\" }},\n    \"total\":{\"$sum\":\"$sampleRead.rmm\"}    \n    }},\n     {\"$sort\":{\"_id\":1}}\n    ];\nreturn msg;\n\n\n\n",
         "outputs": 1,
         "noerr": 0,
         "initialize": "",
@@ -1252,7 +1209,7 @@
         "z": "dbb70c4e5bd29fca",
         "name": "actualiza",
         "links": [
-            "04b01a0798399696"
+            "4b228e05c14d0ebc"
         ],
         "x": 25,
         "y": 1220,
@@ -1281,10 +1238,12 @@
         "from": "",
         "to": "",
         "reg": false,
-        "x": 380,
+        "x": 320,
         "y": 1280,
         "wires": [
-            []
+            [
+                "4b228e05c14d0ebc"
+            ]
         ]
     },
     {
@@ -1305,7 +1264,7 @@
         "sendOnBlur": true,
         "className": "",
         "topicType": "str",
-        "x": 130,
+        "x": 110,
         "y": 1280,
         "wires": [
             [
@@ -1320,9 +1279,9 @@
         "name": "",
         "statusCode": "",
         "headers": {
-            "Content-Disposition": "attachment; filename=registros_int.csv"
+            "Content-Disposition": "attachment; filename=registros_meteo.csv"
         },
-        "x": 1130,
+        "x": 1150,
         "y": 1640,
         "wires": []
     },
@@ -1350,7 +1309,7 @@
         "type": "function",
         "z": "dbb70c4e5bd29fca",
         "name": "consulta",
-        "func": "// fecha por defecto es hoy\nvar ahora = new Date();\n// pillo los globales si los hay, si no la fecha de hoy\nvar desde = new Date(global.get(\"desde\") || ahora);\nvar hasta = new Date(global.get(\"hasta\") || ahora); \n// el día de inicio desde las cero horas\nvar inicio = new Date(desde.getFullYear(),desde.getMonth(),desde.getDate(),0,0,0,0);\n// el día final es hasta final del día\nvar final = new Date(hasta.getFullYear(),hasta.getMonth(),hasta.getDate(),23,59,59,999);\n\nmsg.payload=\n[\n    { \"$match\": { \"date\": { \"$gte\": inicio , \"$lte\": final } } },\n    { \"$project\": {\n        \"_id\": 0,\n        \"date\": 1,\n        \"windSpeed\": \"$sampleRead.windSpeed\",\n        \"windAngle\": \"$sampleRead.windAngle\",\n        \"gustWind\":\"$sampleRead.gustWind\",\n        \"gustWindAngle\": \"$sampleRead.gustWindAngle\",\n        \"rmm\":\"$sampleRead.rmm\"\n        }\n    },\n    { \"$sort\": {\"date\": 1} }\n];\n\nreturn msg;",
+        "func": "// fecha por defecto es hoy\nvar ahora = new Date();\n// pillo los globales si los hay, si no la fecha de hoy\nvar desde = new Date(global.get(\"desde\") || ahora);\nvar hasta = new Date(global.get(\"hasta\") || ahora); \n// el día de inicio desde las cero horas\nvar inicio = new Date(desde.getFullYear(),desde.getMonth(),desde.getDate(),0,0,0,0);\n// el día final es hasta final del día\nvar final = new Date(hasta.getFullYear(),hasta.getMonth(),hasta.getDate(),23,59,59,999);\n\nmsg.payload=\n[\n    { \"$match\": { \"fecha\": { \"$gte\": inicio , \"$lte\": final } } },\n    { \"$project\": {\n        \"_id\": 0,\n        \"fecha\": 1,\n        \"windSpeed\": \"$sampleRead.windSpeed\",\n        \"windAngle\": \"$sampleRead.windAngle\",\n        \"gustWind\":\"$sampleRead.gustWind\",\n        \"gustWindAngle\": \"$sampleRead.gustWindAngle\",\n        \"rmm\":\"$sampleRead.rmm\"\n        }\n    },\n    { \"$sort\": {\"fecha\": 1} }\n];\n\nreturn msg;",
         "outputs": 1,
         "noerr": 0,
         "initialize": "",
@@ -1387,9 +1346,9 @@
         "z": "dbb70c4e5bd29fca",
         "group": "96104a3b71f7a704",
         "name": "",
-        "order": 5,
-        "width": "6",
-        "height": "2",
+        "order": 4,
+        "width": 6,
+        "height": 2,
         "format": "<style>\n.button {\n    text-align: center;\n    font: normal 15px Arial;\n    text-decoration: none;\n    background-color: #097479;\n    color: white;\n    padding: 8px 10px;\n    border: none;\n    border-radius: 15px;\n    box-shadow: 0 7px #999;\n    transition: all 0.5s;\n    cursor: pointer;\n    margin:5px;\n  }\n \n\n  .button:hover\n  {\n   background-color: #0b8f95;\n  }\n  \n  .button:active {\n  background-color: #214a4c;\n  box-shadow: 0 5px #666;\n  transform: translateY(4px);\n}\n\n</style>\n<a href=\"/registros/weather\" class=\"button\">Descarga registros</a>\n",
         "storeOutMessages": true,
         "fwdInMessages": true,
@@ -1412,7 +1371,7 @@
         "hdrout": "all",
         "multi": "one",
         "ret": "\\r\\n",
-        "temp": "date, windSpeed, windAngle, gustWind, gustWindAngle, rmm",
+        "temp": "fecha, windSpeed, windAngle, gustWind, gustWindAngle, rmm",
         "skip": 0,
         "strings": true,
         "include_empty_strings": false,
@@ -1432,7 +1391,7 @@
         "name": "",
         "label": "Fecha inicio",
         "group": "96104a3b71f7a704",
-        "order": 2,
+        "order": 1,
         "width": 0,
         "height": 0,
         "passthru": true,
@@ -1454,7 +1413,7 @@
         "name": "",
         "label": "Fecha final",
         "group": "96104a3b71f7a704",
-        "order": 3,
+        "order": 2,
         "width": 0,
         "height": 0,
         "passthru": true,
@@ -1603,7 +1562,7 @@
         "label": "{{msg.topic}}",
         "tooltip": "",
         "group": "96104a3b71f7a704",
-        "order": 4,
+        "order": 3,
         "width": 0,
         "height": 0,
         "passthru": false,
@@ -1675,6 +1634,887 @@
         "info": "",
         "x": 139.2299575805664,
         "y": 1903.840982913971,
+        "wires": []
+    },
+    {
+        "id": "4b228e05c14d0ebc",
+        "type": "link out",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "mode": "link",
+        "links": [
+            "aa5943c76f465d39"
+        ],
+        "x": 455,
+        "y": 1280,
+        "wires": []
+    },
+    {
+        "id": "906c0577960ec458",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "genera datos gráfica ",
+        "func": "var arraylluvia=[];\nvar meses=[];\n// los arrays usados en la represenstación gráfica deben contener objetos JSON con dos campos: {x , y}\n// en x debemos poner la hora en formato \"timestamp\". Si tenemos un objeto fecha se puede convertir usando el método getTime()\n// en y debemos poner el valor de la variable\n// mas info en: https://github.com/node-red/node-red-dashboard/blob/master/Charts.md\n\nfunction trunc (x, posiciones = 0) {\n  var s = x.toString()\n  var l = s.length\n  var decimalLength = s.indexOf('.') + 1\n  var numStr = s.substr(0, decimalLength + posiciones)\n  return Number(numStr)\n}\n\nif(Array.isArray(msg.payload) && msg.payload.length>0)\n{\n    for (var i = 0; i < msg.payload.length; i++) { // añade datos a los arrays\n        mes=msg.payload[i]._id.mes;\n        year=msg.payload[i]._id.year;\n        meses.push(mes + \"/\" + year);\n        arraylluvia.push(trunc(msg.payload[i].total,2));\n    }\n}\n    \nmsg.payload = [{\n        \"series\":[\"Precipitacion (mm)\"],\n        \"data\":[arraylluvia],\n        \"labels\":[meses]\n        }];\n\nreturn msg;  ",
+        "outputs": "1",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 720,
+        "y": 1220,
+        "wires": [
+            [
+                "40d85f4f885934ca"
+            ]
+        ]
+    },
+    {
+        "id": "40265ea6c6294ee1",
+        "type": "inject",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "01 00 * * *",
+        "once": false,
+        "onceDelay": "",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 150,
+        "y": 2180,
+        "wires": [
+            [
+                "36d57a0db402ab99"
+            ]
+        ]
+    },
+    {
+        "id": "36d57a0db402ab99",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "func": "var ahora = new Date();\nvar hoy =  new Date (ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),0,0,0,0 ).getTime();\n\nvar ayer = hoy-86400000;\nmsg.payload= {\"Counter1.SensorViento\":  { \"$gte\": 0},\"Timestamp\": { \"$gte\": ayer , \"$lte\": hoy } };\n\nmsg.sort={\"Timestamp\": 1};\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 340,
+        "y": 2180,
+        "wires": [
+            [
+                "2d4f6361e265c816"
+            ]
+        ]
+    },
+    {
+        "id": "2d4f6361e265c816",
+        "type": "mongodb in",
+        "z": "dbb70c4e5bd29fca",
+        "mongodb": "92100aa3.6b2d88",
+        "name": "",
+        "collection": "meteorologia",
+        "operation": "find",
+        "x": 580,
+        "y": 2180,
+        "wires": [
+            [
+                "5caa952ba3f0d7b1"
+            ]
+        ]
+    },
+    {
+        "id": "5caa952ba3f0d7b1",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "func": "var suma_vel=0;\n\n\nfor (var i = 0; i < msg.payload.length-1; i++)\n{\n    suma_vel=suma_vel+msg.payload[i].sampleRead.windSpeed;\n}\n\nmedia=suma_vel/i;\n\nmsg.payload=media;\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 800,
+        "y": 2180,
+        "wires": [
+            [
+                "9f222819931cc87d"
+            ]
+        ]
+    },
+    {
+        "id": "9f222819931cc87d",
+        "type": "change",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "u2",
+                "pt": "global",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 950,
+        "y": 2180,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "2218fc8bf7125ecd",
+        "type": "comment",
+        "z": "dbb70c4e5bd29fca",
+        "name": "Extracción Vmed viento para Eto",
+        "info": "",
+        "x": 150,
+        "y": 2120,
+        "wires": []
+    },
+    {
+        "id": "575dd996cda921f6",
+        "type": "inject",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "01 00 * * *",
+        "once": false,
+        "onceDelay": "",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 150,
+        "y": 2300,
+        "wires": [
+            [
+                "4b5dbabb7392eefc"
+            ]
+        ]
+    },
+    {
+        "id": "4b5dbabb7392eefc",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "func": "var ahora = new Date();\nvar hoy =  new Date (ahora.getFullYear(),ahora.getMonth(),ahora.getDate(),0,0,0,0 ).getTime();\n\nvar ayer = hoy-86400000;\nmsg.payload= {\"Counter1.SensorLluvia\":  { \"$gte\": 0},\"Timestamp\": { \"$gte\": ayer , \"$lte\": hoy } };\n\nmsg.sort={\"Timestamp\": 1};\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 340,
+        "y": 2300,
+        "wires": [
+            [
+                "3d35264a46ed6d84"
+            ]
+        ]
+    },
+    {
+        "id": "3d35264a46ed6d84",
+        "type": "mongodb in",
+        "z": "dbb70c4e5bd29fca",
+        "mongodb": "92100aa3.6b2d88",
+        "name": "",
+        "collection": "meteorologia",
+        "operation": "find",
+        "x": 580,
+        "y": 2300,
+        "wires": [
+            [
+                "cf34272e163d1323"
+            ]
+        ]
+    },
+    {
+        "id": "cf34272e163d1323",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "func": "var suma_lluvia=0;\n\n\nfor (var i = 0; i < msg.payload.length-1; i++)\n{\n    suma_lluvia=suma_lluvia+msg.payload[i].sampleRead.rmm;\n}\n\nmsg.payload=suma_lluvia;\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 800,
+        "y": 2300,
+        "wires": [
+            [
+                "2bae2334aabdaa2c"
+            ]
+        ]
+    },
+    {
+        "id": "2bae2334aabdaa2c",
+        "type": "change",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "totalPrecipitacion",
+                "pt": "global",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1000,
+        "y": 2300,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "0b9f999d90556059",
+        "type": "comment",
+        "z": "dbb70c4e5bd29fca",
+        "name": "Extracción lluvia diaria para corregir Eto",
+        "info": "",
+        "x": 170,
+        "y": 2240,
+        "wires": []
+    },
+    {
+        "id": "2aa4a81533b74248",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "func": "msg.payload = {};\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 240,
+        "y": 1400,
+        "wires": [
+            [
+                "0eca0ad7df2b2a86"
+            ]
+        ]
+    },
+    {
+        "id": "c66e8cdd3ecb021c",
+        "type": "inject",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 100,
+        "y": 1400,
+        "wires": [
+            [
+                "2aa4a81533b74248"
+            ]
+        ]
+    },
+    {
+        "id": "e7c053a822350978",
+        "type": "mqtt in",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "topic": "orchard/meteorologia/ESP32Client-2901555720",
+        "qos": "2",
+        "datatype": "auto",
+        "broker": "fc5c9554.5f0878",
+        "nl": false,
+        "rap": false,
+        "inputs": 0,
+        "x": 240,
+        "y": 2780,
+        "wires": [
+            [
+                "204c99d615e315c8"
+            ]
+        ]
+    },
+    {
+        "id": "204c99d615e315c8",
+        "type": "json",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "property": "payload",
+        "action": "",
+        "pretty": false,
+        "x": 570,
+        "y": 2780,
+        "wires": [
+            [
+                "cb9f3771a374c060",
+                "fee6ef5416bec430",
+                "e0af3407ac1255fa"
+            ]
+        ]
+    },
+    {
+        "id": "cb9f3771a374c060",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "ChipID",
+        "func": "p=msg.payload;\nnode.log(typeof p);\nmsg.payload=p.ChipID;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 750,
+        "y": 2740,
+        "wires": [
+            [
+                "caabc77182c43430"
+            ]
+        ]
+    },
+    {
+        "id": "1d7f2a0231c4615f",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "SSID",
+        "func": "p=msg.payload;\nnode.log(typeof p);\nmsg.payload=p.WiFi.SSID;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "x": 750,
+        "y": 2580,
+        "wires": [
+            [
+                "8aaab769dac76299"
+            ]
+        ]
+    },
+    {
+        "id": "c6ec48ed5460f848",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "IP",
+        "func": "p=msg.payload;\nnode.log(typeof p);\nmsg.payload=p.WiFi.IP;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "x": 750,
+        "y": 2620,
+        "wires": [
+            [
+                "fb6fdb2fb18cdb94"
+            ]
+        ]
+    },
+    {
+        "id": "91643a06320a6c0d",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "RSSI",
+        "func": "p=msg.payload;\nnode.log(typeof p);\nmsg.payload=p.WiFi.RSSI;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "x": 750,
+        "y": 2660,
+        "wires": [
+            [
+                "2fefcdbd713c6ac8"
+            ]
+        ]
+    },
+    {
+        "id": "149110b9c7359f5b",
+        "type": "inject",
+        "z": "dbb70c4e5bd29fca",
+        "name": "Hora",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 130,
+        "y": 2400,
+        "wires": [
+            [
+                "10a16fcebc02fd51"
+            ]
+        ]
+    },
+    {
+        "id": "993f1904515b5d2c",
+        "type": "ui_text",
+        "z": "dbb70c4e5bd29fca",
+        "group": "58fb9c8e558d0f88",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "name": "",
+        "label": "Fecha y hora local:",
+        "format": "{{msg.payload}}",
+        "layout": "row-left",
+        "className": "",
+        "x": 570,
+        "y": 2400,
+        "wires": []
+    },
+    {
+        "id": "10a16fcebc02fd51",
+        "type": "moment",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "topic": "",
+        "input": "payload",
+        "inputType": "msg",
+        "inTz": "Africa/Abidjan",
+        "adjAmount": "0",
+        "format": "DD-MM-YYYY HH:mm:ss",
+        "locale": "POSIX",
+        "output": "payload",
+        "outputType": "msg",
+        "outTz": "Africa/Abidjan",
+        "x": 340,
+        "y": 2400,
+        "wires": [
+            [
+                "993f1904515b5d2c"
+            ]
+        ]
+    },
+    {
+        "id": "1ea7b6722d077884",
+        "type": "comment",
+        "z": "dbb70c4e5bd29fca",
+        "name": "Informacion ESP32 / Actualizacion FOTA (Async)",
+        "info": "",
+        "x": 200,
+        "y": 2360,
+        "wires": []
+    },
+    {
+        "id": "f87f08f289cbd203",
+        "type": "mqtt in",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "topic": "orchard/meteorologia/ESP32Client-2901555720/connection",
+        "qos": "2",
+        "datatype": "auto",
+        "broker": "fc5c9554.5f0878",
+        "nl": false,
+        "rap": false,
+        "inputs": 0,
+        "x": 270,
+        "y": 2540,
+        "wires": [
+            [
+                "61d7f259aab9be61"
+            ]
+        ]
+    },
+    {
+        "id": "61d7f259aab9be61",
+        "type": "ui_text",
+        "z": "dbb70c4e5bd29fca",
+        "group": "58fb9c8e558d0f88",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "name": "",
+        "label": "Estado:",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 580,
+        "y": 2540,
+        "wires": []
+    },
+    {
+        "id": "caabc77182c43430",
+        "type": "ui_text",
+        "z": "dbb70c4e5bd29fca",
+        "group": "58fb9c8e558d0f88",
+        "order": 2,
+        "width": 0,
+        "height": 0,
+        "name": "",
+        "label": "ChipID",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 890,
+        "y": 2740,
+        "wires": []
+    },
+    {
+        "id": "2fefcdbd713c6ac8",
+        "type": "ui_text",
+        "z": "dbb70c4e5bd29fca",
+        "group": "58fb9c8e558d0f88",
+        "order": 5,
+        "width": 0,
+        "height": 0,
+        "name": "",
+        "label": "RSSI",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 890,
+        "y": 2660,
+        "wires": []
+    },
+    {
+        "id": "fb6fdb2fb18cdb94",
+        "type": "ui_text",
+        "z": "dbb70c4e5bd29fca",
+        "group": "58fb9c8e558d0f88",
+        "order": 4,
+        "width": 0,
+        "height": 0,
+        "name": "",
+        "label": "IP",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 890,
+        "y": 2620,
+        "wires": []
+    },
+    {
+        "id": "8aaab769dac76299",
+        "type": "ui_text",
+        "z": "dbb70c4e5bd29fca",
+        "group": "58fb9c8e558d0f88",
+        "order": 3,
+        "width": 0,
+        "height": 0,
+        "name": "",
+        "label": "SSID",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 890,
+        "y": 2580,
+        "wires": []
+    },
+    {
+        "id": "ad1ae824a3738bc1",
+        "type": "change",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "urlAct",
+                "pt": "flow",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 920,
+        "y": 2700,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "71af1581c41f0961",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "URL",
+        "func": "p=msg.payload;\nnode.log(typeof p);\nmsg.payload=\"http://\" + p.WiFi.IP + \"/update\";\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 750,
+        "y": 2700,
+        "wires": [
+            [
+                "ad1ae824a3738bc1"
+            ]
+        ]
+    },
+    {
+        "id": "49faaeb49c4f82c1",
+        "type": "ui_button",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "group": "58fb9c8e558d0f88",
+        "order": 6,
+        "width": 0,
+        "height": 0,
+        "passthru": false,
+        "label": "Comprobar actualizaciones",
+        "tooltip": "",
+        "color": "black",
+        "bgcolor": "white",
+        "className": "",
+        "icon": "",
+        "payload": "urlAct",
+        "payloadType": "flow",
+        "topic": "orchard/meteorologia/ESP32Client-2901555720/update",
+        "topicType": "str",
+        "x": 180,
+        "y": 2860,
+        "wires": [
+            [
+                "e8a5b858603a276c"
+            ]
+        ]
+    },
+    {
+        "id": "e8a5b858603a276c",
+        "type": "ui_template",
+        "z": "dbb70c4e5bd29fca",
+        "group": "58fb9c8e558d0f88",
+        "name": "window redirect",
+        "order": 7,
+        "width": 0,
+        "height": 0,
+        "format": "<script>\n(function(scope) {\n    scope.$watch('msg', function(data) {\n        if (data.topic == \"orchard/meteorologia/ESP32Client-2901555720/update\") {\n          window.location.href = data.payload;\n        } \n    });\n})(scope);\n</script>",
+        "storeOutMessages": false,
+        "fwdInMessages": true,
+        "resendOnRefresh": false,
+        "templateScope": "local",
+        "className": "",
+        "x": 460,
+        "y": 2860,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "2383ca3d6b9ef8ab",
+        "type": "mqtt out",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "topic": "HortSost/TFG/ESPAct/ESPSens/conexion",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "fc5c9554.5f0878",
+        "x": 560,
+        "y": 2460,
+        "wires": []
+    },
+    {
+        "id": "798fd1dac5d10e50",
+        "type": "inject",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "1",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 150,
+        "y": 2460,
+        "wires": [
+            [
+                "016029875956a408"
+            ]
+        ]
+    },
+    {
+        "id": "016029875956a408",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "CONECT",
+        "func": "msg.payload=flow.get(\"conection\");\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "x": 300,
+        "y": 2460,
+        "wires": [
+            [
+                "2383ca3d6b9ef8ab"
+            ]
+        ]
+    },
+    {
+        "id": "b25f86f32db8ac89",
+        "type": "mqtt in",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "topic": "orchard/meteorologia/ESP32Client-2901555720/partialdata",
+        "qos": "2",
+        "datatype": "auto",
+        "broker": "fc5c9554.5f0878",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 270,
+        "y": 2640,
+        "wires": [
+            [
+                "4db7a223d96f0609"
+            ]
+        ]
+    },
+    {
+        "id": "4db7a223d96f0609",
+        "type": "json",
+        "z": "dbb70c4e5bd29fca",
+        "name": "",
+        "property": "payload",
+        "action": "",
+        "pretty": false,
+        "x": 570,
+        "y": 2640,
+        "wires": [
+            [
+                "1d7f2a0231c4615f",
+                "c6ec48ed5460f848",
+                "91643a06320a6c0d",
+                "71af1581c41f0961"
+            ]
+        ]
+    },
+    {
+        "id": "fee6ef5416bec430",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "HW",
+        "func": "p=msg.payload;\nnode.log(typeof p);\nmsg.payload=p.HW;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 750,
+        "y": 2780,
+        "wires": [
+            [
+                "cf434a86bdd3c5bd"
+            ]
+        ]
+    },
+    {
+        "id": "cf434a86bdd3c5bd",
+        "type": "ui_text",
+        "z": "dbb70c4e5bd29fca",
+        "group": "58fb9c8e558d0f88",
+        "order": 2,
+        "width": 0,
+        "height": 0,
+        "name": "",
+        "label": "HW",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 890,
+        "y": 2780,
+        "wires": []
+    },
+    {
+        "id": "e0af3407ac1255fa",
+        "type": "function",
+        "z": "dbb70c4e5bd29fca",
+        "name": "fw_ver",
+        "func": "p=msg.payload;\nnode.log(typeof p);\nmsg.payload=p.fw_ver;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 750,
+        "y": 2820,
+        "wires": [
+            [
+                "165372f6efee8f65"
+            ]
+        ]
+    },
+    {
+        "id": "165372f6efee8f65",
+        "type": "ui_text",
+        "z": "dbb70c4e5bd29fca",
+        "group": "58fb9c8e558d0f88",
+        "order": 2,
+        "width": 0,
+        "height": 0,
+        "name": "",
+        "label": "fw_ver",
+        "format": "{{msg.payload}}",
+        "layout": "row-spread",
+        "className": "",
+        "x": 890,
+        "y": 2820,
         "wires": []
     },
     {
@@ -1773,6 +2613,17 @@
         "name": "Descarga tus registros",
         "tab": "7aae08ab81029b8d",
         "order": 5,
+        "disp": true,
+        "width": "6",
+        "collapse": false,
+        "className": ""
+    },
+    {
+        "id": "58fb9c8e558d0f88",
+        "type": "ui_group",
+        "name": "ESP32 .- Informacion",
+        "tab": "7aae08ab81029b8d",
+        "order": 6,
         "disp": true,
         "width": "6",
         "collapse": false,
