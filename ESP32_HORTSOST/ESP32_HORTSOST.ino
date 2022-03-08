@@ -6,8 +6,8 @@
 #include <SimpleTimer.h> //repetitive tasks
 #include "esp_system.h" //watchdog
 #include "time.h"
-//#include <HTTPUpdate.h>
-//#include <HTTPClient.h>
+#include <HTTPUpdate.h>
+#include <HTTPClient.h>
 #include "build_defs.h"
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -93,7 +93,7 @@ void setup()
   client.setServer(MQTT_SERVER, MQTT_PORT);
   client.setCallback(callback);
   client.setBufferSize(512);
-//  checkForUpdates();
+  checkForUpdates();
 
   //init watchdog
   watchDogTimer = timerBegin(0, 80, true); //timer 0, div80
@@ -467,17 +467,17 @@ void startUpdateServer() {
   Serial.println("HTTP server started");
 }
 
-//void checkForUpdates() {
-//  Serial.println("Check FOTA...");
-//  switch (httpUpdate.update(espClient, OTA_URL, HTTP_OTA_VERSION)) {
-//    case HTTP_UPDATE_FAILED:
-//      Serial.printf(" HTTP update failed: Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
-//      break;
-//    case HTTP_UPDATE_NO_UPDATES:
-//      Serial.println(F(" El dispositivo ya está actualizado"));
-//      break;
-//    case HTTP_UPDATE_OK:
-//      Serial.println(F(" OK"));
-//      break;
-//  }
-//}
+void checkForUpdates() {
+  Serial.println("Check FOTA...");
+  switch (httpUpdate.update(espClient, OTA_URL, HTTP_OTA_VERSION)) {
+    case HTTP_UPDATE_FAILED:
+      Serial.printf(" HTTP update failed: Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+      break;
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println(F(" El dispositivo ya está actualizado"));
+      break;
+    case HTTP_UPDATE_OK:
+      Serial.println(F(" OK"));
+      break;
+  }
+}
