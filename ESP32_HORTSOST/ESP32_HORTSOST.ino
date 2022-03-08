@@ -6,10 +6,12 @@
 #include <SimpleTimer.h> //repetitive tasks
 #include "esp_system.h" //watchdog
 #include "time.h"
-#include <HTTPUpdate.h>
-#include <HTTPClient.h>
+//#include <HTTPUpdate.h>
+//#include <HTTPClient.h>
 #include "build_defs.h"
-
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncElegantOTA.h>
 
 /**********************************************************************
    VARS
@@ -19,6 +21,7 @@
 //WiFiClientSecure espClient;
 WiFiClient espClient;
 PubSubClient client(espClient);
+AsyncWebServer server(80);
 
 const unsigned char FWVER[] =
 {
@@ -90,7 +93,7 @@ void setup()
   client.setServer(MQTT_SERVER, MQTT_PORT);
   client.setCallback(callback);
   client.setBufferSize(512);
-  checkForUpdates();
+//  checkForUpdates();
 
   //init watchdog
   watchDogTimer = timerBegin(0, 80, true); //timer 0, div80
@@ -182,12 +185,12 @@ String sendPartialSample(WindSample ws) {
   String jsonString;
   JsonObject Wifi = jsonRoot.createNestedObject("WiFi");
   Wifi["SSID"] = WIFI_SSID;
-  Wifi["IP"] = WiFi.localIP().toString();;
+  Wifi["IP"] = WiFi.localIP().toString();
   Wifi["RSSI"] = WiFi.RSSI();
   JsonObject Counter1 = jsonRoot.createNestedObject("Counter1");
   Counter1["SensorViento"] = ws.anemometerCyclesCounterRegister;
   JsonObject sampleRead = jsonRoot.createNestedObject("sampleRead");
-  sampleRead["windSpeed"] = truncar(ws.windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 2);
+  sampleRead["windSpeed"] = ws.windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR;
   sampleRead["windAngle"] = ws.windAngle;
   sampleRead["sampleTime"] = ws.sampleMillis;
   serializeJson(jsonRoot, jsonString);
@@ -217,9 +220,9 @@ String sendFullSamples(SensorsSample * samples, int samplesToSend) {
     Counter1["SensorLluvia"] = samples[i].rainCyclesPerMinute;
     Counter1["SensorViento"] = samples[i].anemometerCyclesCounterRegister;
     JsonObject sampleRead = jsonRoot.createNestedObject("sampleRead");
-    sampleRead["windSpeed"] = truncar((samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR), 2);
+    sampleRead["windSpeed"] = samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR;
     sampleRead["windAngle"] = samples[i].windAngle;
-    sampleRead["gustWind"] = truncar(samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR, 2);
+    sampleRead["gustWind"] = samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR;
     sampleRead["gustWindAngle"] = samples[i].gustAngle;
     sampleRead["rmm"] = samples[i].rainCyclesPerMinute * (float)RAIN_BUCKET_MM_PER_CYCLE;
     sampleRead["sampleTime"] = samples[i].sampleMillis;
@@ -281,6 +284,7 @@ void connectToNetwork() {
   Serial.println("WiFi conectado");
   Serial.println("Direccion IP: ");
   Serial.println(WiFi.localIP());
+  startUpdateServer();
   // DESCOMENTAR CUANDO SE DESCOMENTE WIFISECURE!!
 //  espClient.setInsecure();
 //  espClient.setTimeout(12);
@@ -453,32 +457,27 @@ int meanAngle (int *angles, int size)
   }
 }
 
-//float truncar (float num, int pos) {
-//  String string = String(num);
-//  unsigned int longitud = string.length();
-//  float decimalLength = string.indexOf('.') + longitud;
-//  String numStr = string.substring(0, decimalLength + pos);
-//  return numStr.toFloat();
+void startUpdateServer() {
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send(200, "text/plain", "Hi! I am ESP32.");
+  });
+
+  AsyncElegantOTA.begin(&server);    // Start ElegantOTA
+  server.begin();
+  Serial.println("HTTP server started");
+}
+
+//void checkForUpdates() {
+//  Serial.println("Check FOTA...");
+//  switch (httpUpdate.update(espClient, OTA_URL, HTTP_OTA_VERSION)) {
+//    case HTTP_UPDATE_FAILED:
+//      Serial.printf(" HTTP update failed: Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+//      break;
+//    case HTTP_UPDATE_NO_UPDATES:
+//      Serial.println(F(" El dispositivo ya está actualizado"));
+//      break;
+//    case HTTP_UPDATE_OK:
+//      Serial.println(F(" OK"));
+//      break;
+//  }
 //}
-
-float truncar( float in_value, int decimal_place )
-{
-  float multiplier = powf( 10.0f, decimal_place );
-  in_value = roundf( in_value * multiplier ) / multiplier;
-  return in_value;
-}
-
-void checkForUpdates() {
-  Serial.println("Check FOTA...");
-  switch (httpUpdate.update(espClient, OTA_URL, HTTP_OTA_VERSION)) {
-    case HTTP_UPDATE_FAILED:
-      Serial.printf(" HTTP update failed: Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
-      break;
-    case HTTP_UPDATE_NO_UPDATES:
-      Serial.println(F(" El dispositivo ya está actualizado"));
-      break;
-    case HTTP_UPDATE_OK:
-      Serial.println(F(" OK"));
-      break;
-  }
-}

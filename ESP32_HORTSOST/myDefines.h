@@ -14,8 +14,8 @@
 #define HTTP_OTA_VERSION      String(__FILE__).substring(String(__FILE__).lastIndexOf('\\')+1) + ".doitESP32devkitV4" 
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 0
-#define __DEBUG__ true   //set to true for debug output, false for no debug ouput
-#define Serial if(__DEBUG__)Serial
+//#define __DEBUG__ true   //set to true for debug output, false for no debug ouput
+//#define Serial if(__DEBUG__)Serial
 
 #define TYPE_NODE String("meteorologia")
 /**********************************************************************
