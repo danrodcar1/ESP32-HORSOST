@@ -55,14 +55,12 @@ unsigned long lastMinuteSampleMillis = 0;
 int windvaneADRefValues[] = { VANE_AD_N, VANE_AD_NE, VANE_AD_E, VANE_AD_SE, VANE_AD_S, VANE_AD_SW, VANE_AD_W, VANE_AD_NW };
 
 struct WindSample {
-  float anemometerCyclesCounterRegister;
   float windCyclesPerSecond;
   int windAngle;
   unsigned long sampleMillis;
 };
 
 struct SensorsSample {
-  float anemometerCyclesCounterRegister;
   float windCyclesPerSecond;
   int windAngle;
   float gustCyclesPerSecond;
@@ -141,7 +139,7 @@ void captureAndSendPartialSample() {
   float anemometerCyclesCounterRegister = anemometerCyclesCounter;
   anemometerCyclesCounter = 0;//reset the partial interrupt counter to 0
   int windAngle = analogToAngleDirection(readADC_Avg(analogRead(WINDVANE_PIN)), windvaneADRefValues);
-  windSamples[0] = {anemometerCyclesCounterRegister, windCyclesPerSecond, windAngle, currentSampleMillis};
+  windSamples[0] = {windCyclesPerSecond, windAngle, currentSampleMillis};
   client.publish(partialSample_topic, sendPartialSample(windSamples[0]).c_str(), true);
 }
 
@@ -156,14 +154,12 @@ void captureAndSendMinuteSample() {
   unsigned long currentSampleMillis = millis();
   float elapsedSeconds = (float)(currentSampleMillis - prevSampleMillis) / (float)1000;
   float windCyclesPerSecond = (float)anemometerMinuteCyclesCounter / elapsedSeconds;
-  float anemometerCyclesCounterRegister = anemometerMinuteCyclesCounter;
   int avgWindAngle = 0, gustAngle = 0;
   float gustCyclesPerSecond = 0;
 
   calcValuesFromWindSamples(windSamples, WIND_SAMPLES_SIZE, avgWindAngle, gustCyclesPerSecond, gustAngle);
 
   SensorsSample avgMinuteSample = {
-    anemometerCyclesCounterRegister,
     windCyclesPerSecond,
     avgWindAngle,
     gustCyclesPerSecond,
@@ -188,7 +184,7 @@ String sendPartialSample(WindSample ws) {
   Wifi["IP"] = WiFi.localIP().toString();
   Wifi["RSSI"] = WiFi.RSSI();
   JsonObject Counter1 = jsonRoot.createNestedObject("Counter1");
-  Counter1["SensorViento"] = ws.anemometerCyclesCounterRegister;
+  Counter1["SensorViento"] = ws.windCyclesPerSecond;
   JsonObject sampleRead = jsonRoot.createNestedObject("sampleRead");
   sampleRead["windSpeed"] = ws.windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR;
   sampleRead["windAngle"] = ws.windAngle;
@@ -218,7 +214,7 @@ String sendFullSamples(SensorsSample * samples, int samplesToSend) {
     String jsonString;
     JsonObject Counter1 = jsonRoot.createNestedObject("Counter1");
     Counter1["SensorLluvia"] = samples[i].rainCyclesPerMinute;
-    Counter1["SensorViento"] = samples[i].anemometerCyclesCounterRegister;
+    Counter1["SensorViento"] = samples[i].windCyclesPerSecond;
     JsonObject sampleRead = jsonRoot.createNestedObject("sampleRead");
     sampleRead["windSpeed"] = samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR;
     sampleRead["windAngle"] = samples[i].windAngle;
