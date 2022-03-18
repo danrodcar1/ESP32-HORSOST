@@ -18,8 +18,7 @@
 ***********************************************************************/
 
 // ESP32  WiFi & UPDATE SERVER
-//WiFiClientSecure espClient;
-WiFiClient espClient;
+WiFiClientSecure espClient;
 PubSubClient client(espClient);
 AsyncWebServer server(80);
 
@@ -66,6 +65,8 @@ struct SensorsSample {
   float gustCyclesPerSecond;
   int gustAngle;
   int rainCyclesPerMinute;
+  int windCyclesPerMinute;
+  unsigned long  elapsedSeconds;
   unsigned long  sampleMillis;
 };
 
@@ -101,12 +102,11 @@ void setup()
 
   initSamplesArrays();
 
-  pinMode(ANEMOMETER_PIN, INPUT_PULLUP);
-  pinMode(RAINGAUGE_PIN, INPUT_PULLUP);
+  pinMode(ANEMOMETER_PIN, INPUT);
+  pinMode(RAINGAUGE_PIN, INPUT);
   attachInterrupt(digitalPinToInterrupt(ANEMOMETER_PIN), countAnemometerCycles, FALLING);
   attachInterrupt(digitalPinToInterrupt(RAINGAUGE_PIN), countRainCycles, FALLING);
 
-  timerManager.setInterval(WIND_SAMPLING_SECONDS * 1000, captureAndSendPartialSample); // Capture values each 10''
   timerManager.setInterval(DATA_SAMPLING_MINUTES * 60000L, captureAndSendMinuteSample); // Send values each 10'
 }
 
@@ -123,25 +123,6 @@ void loop()
 /***********************************************************************
   OPERATIONAL FUNCTIONS
 ***********************************************************************/
-
-void captureAndSendPartialSample() {
-  String clientId = "ESP32Client-";
-  uint32_t chipID = ESP.getEfuseMac();
-  clientId += String(chipID);
-  String topic_string = ("orchard/" + TYPE_NODE + "/" + clientId + "/partialdata");                             // Select topic by ESP ID
-  const char* partialSample_topic = topic_string.c_str();
-
-  shiftArrayToRight_ws(windSamples, WIND_SAMPLES_SIZE);
-  float prevSampleMillis = windSamples[1].sampleMillis;
-  unsigned long currentSampleMillis = millis();
-  float elapsedSeconds = (float)(currentSampleMillis - prevSampleMillis) / (float)1000;
-  float windCyclesPerSecond = (float)anemometerCyclesCounter / elapsedSeconds;
-  float anemometerCyclesCounterRegister = anemometerCyclesCounter;
-  anemometerCyclesCounter = 0;//reset the partial interrupt counter to 0
-  int windAngle = analogToAngleDirection(readADC_Avg(analogRead(WINDVANE_PIN)), windvaneADRefValues);
-  windSamples[0] = {windCyclesPerSecond, windAngle, currentSampleMillis};
-  client.publish(partialSample_topic, sendPartialSample(windSamples[0]).c_str(), true);
-}
 
 void captureAndSendMinuteSample() {
   String clientId = "ESP32Client-";
@@ -165,6 +146,8 @@ void captureAndSendMinuteSample() {
     gustCyclesPerSecond,
     gustAngle,
     rainCyclesCounter,
+    anemometerMinuteCyclesCounter,
+    elapsedSeconds,
     currentSampleMillis
   };
 
@@ -173,24 +156,9 @@ void captureAndSendMinuteSample() {
   lastMinuteSampleMillis = currentSampleMillis;
   shiftArrayToRight_ss(avgMinuteSamplesLog, WIND_AVG_MINUTE_LOG_SIZE);
   avgMinuteSamplesLog[0] = avgMinuteSample;
-  client.publish(fullSample_topic, sendFullSamples(avgMinuteSamplesLog, 1).c_str(), true);
-}
 
-String sendPartialSample(WindSample ws) {
-  DynamicJsonDocument jsonRoot(2048);
-  String jsonString;
-  JsonObject Wifi = jsonRoot.createNestedObject("WiFi");
-  Wifi["SSID"] = WIFI_SSID;
-  Wifi["IP"] = WiFi.localIP().toString();
-  Wifi["RSSI"] = WiFi.RSSI();
-  JsonObject Counter1 = jsonRoot.createNestedObject("Counter1");
-  Counter1["SensorViento"] = ws.windCyclesPerSecond;
-  JsonObject sampleRead = jsonRoot.createNestedObject("sampleRead");
-  sampleRead["windSpeed"] = ws.windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR;
-  sampleRead["windAngle"] = ws.windAngle;
-  sampleRead["sampleTime"] = ws.sampleMillis;
-  serializeJson(jsonRoot, jsonString);
-  return jsonString;
+  client.publish(fullSample_topic, sendFullSamples(avgMinuteSamplesLog, 1).c_str(), true);
+  checkForUpdates();
 }
 
 void sendDataEspFW() {
@@ -214,14 +182,15 @@ String sendFullSamples(SensorsSample * samples, int samplesToSend) {
     String jsonString;
     JsonObject Counter1 = jsonRoot.createNestedObject("Counter1");
     Counter1["SensorLluvia"] = samples[i].rainCyclesPerMinute;
-    Counter1["SensorViento"] = samples[i].windCyclesPerSecond;
-    JsonObject sampleRead = jsonRoot.createNestedObject("sampleRead");
-    sampleRead["windSpeed"] = samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR;
-    sampleRead["windAngle"] = samples[i].windAngle;
-    sampleRead["gustWind"] = samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR;
-    sampleRead["gustWindAngle"] = samples[i].gustAngle;
-    sampleRead["rmm"] = samples[i].rainCyclesPerMinute * (float)RAIN_BUCKET_MM_PER_CYCLE;
-    sampleRead["sampleTime"] = samples[i].sampleMillis;
+    Counter1["SensorViento"] = samples[i].windCyclesPerMinute;
+
+    jsonRoot["velocidad"] = (float)samples[i].windCyclesPerMinute * (float)ANEMOMETER_SPEED_FACTOR / (float)samples[i].elapsedSeconds;
+    jsonRoot["velocidad_v2"] = (samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR) * 3.6;
+    jsonRoot["velocidadRafaga"] = samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR;
+    jsonRoot["direccion"] = samples[i].windAngle;
+    jsonRoot["anguloRafaga"] = samples[i].gustAngle;
+    jsonRoot["litros"] = samples[i].rainCyclesPerMinute * (float)RAIN_BUCKET_MM_PER_CYCLE;
+    jsonRoot["segundos"] = samples[i].sampleMillis / 1000;
     serializeJson(jsonRoot, jsonString);
     return jsonString;
   }
@@ -281,9 +250,8 @@ void connectToNetwork() {
   Serial.println("Direccion IP: ");
   Serial.println(WiFi.localIP());
   startUpdateServer();
-  // DESCOMENTAR CUANDO SE DESCOMENTE WIFISECURE!!
-//  espClient.setInsecure();
-//  espClient.setTimeout(12);
+  espClient.setInsecure();
+  espClient.setTimeout(12);
 }
 
 void reconnect() {

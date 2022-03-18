@@ -4,10 +4,10 @@
 #define WIFI_SSID           "huerticawifi"
 #define WIFI_PASSWORD       "4cc3sshu3rt1c4"
 
-#define MQTT_SERVER         "10.10.10.10"//"huertociencias.uma.es"
-#define MQTT_PORT           1883//8163
-#define MQTT_USER           NULL//"huerta"
-#define MQTT_PASSWORD       NULL//"accesohuertica"
+#define MQTT_SERVER         "huertociencias.uma.es"
+#define MQTT_PORT           8163
+#define MQTT_USER           "huerta"
+#define MQTT_PASSWORD       "accesohuertica"
 #define MQTT_FINGERPRINT    "f6 59 59 a8 8d 75 86 07 ce a3 1a c3 93 3e 65 5f ae 72 99 45"
 
 #define OTA_URL             "https://huertociencias.uma.es/esp8266-ota-update"
