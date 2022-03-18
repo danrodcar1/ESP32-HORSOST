@@ -107,6 +107,7 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(ANEMOMETER_PIN), countAnemometerCycles, FALLING);
   attachInterrupt(digitalPinToInterrupt(RAINGAUGE_PIN), countRainCycles, FALLING);
 
+  timerManager.setInterval(WIND_SAMPLING_SECONDS * 1000, captureAndSendPartialSample); // Capture values each 10''
   timerManager.setInterval(DATA_SAMPLING_MINUTES * 60000L, captureAndSendMinuteSample); // Send values each 10'
 }
 
@@ -123,6 +124,19 @@ void loop()
 /***********************************************************************
   OPERATIONAL FUNCTIONS
 ***********************************************************************/
+
+void captureAndSendPartialSample() {
+
+  shiftArrayToRight_ws(windSamples, WIND_SAMPLES_SIZE);
+  float prevSampleMillis = windSamples[1].sampleMillis;
+  unsigned long currentSampleMillis = millis();
+  float elapsedSeconds = (float)(currentSampleMillis - prevSampleMillis) / (float)1000;
+  float windCyclesPerSecond = (float)anemometerCyclesCounter / elapsedSeconds;
+  float anemometerCyclesCounterRegister = anemometerCyclesCounter;
+  anemometerCyclesCounter = 0;//reset the partial interrupt counter to 0
+  int windAngle = analogToAngleDirection(readADC_Avg(analogRead(WINDVANE_PIN)), windvaneADRefValues);
+  windSamples[0] = {windCyclesPerSecond, windAngle, currentSampleMillis};
+}
 
 void captureAndSendMinuteSample() {
   String clientId = "ESP32Client-";
@@ -185,12 +199,11 @@ String sendFullSamples(SensorsSample * samples, int samplesToSend) {
     Counter1["SensorViento"] = samples[i].windCyclesPerMinute;
 
     jsonRoot["velocidad"] = (float)samples[i].windCyclesPerMinute * (float)ANEMOMETER_SPEED_FACTOR / (float)samples[i].elapsedSeconds;
-    jsonRoot["velocidad_v2"] = (samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR) * 3.6;
     jsonRoot["velocidadRafaga"] = samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR;
     jsonRoot["direccion"] = samples[i].windAngle;
-    jsonRoot["anguloRafaga"] = samples[i].gustAngle;
+    jsonRoot["direccionRafaga"] = samples[i].gustAngle;
     jsonRoot["litros"] = samples[i].rainCyclesPerMinute * (float)RAIN_BUCKET_MM_PER_CYCLE;
-    jsonRoot["segundos"] = samples[i].sampleMillis / 1000;
+    jsonRoot["segundos"] = samples[i].elapsedSeconds;
     serializeJson(jsonRoot, jsonString);
     return jsonString;
   }

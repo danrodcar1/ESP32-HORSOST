@@ -11,7 +11,7 @@
 #define MQTT_FINGERPRINT    "f6 59 59 a8 8d 75 86 07 ce a3 1a c3 93 3e 65 5f ae 72 99 45"
 
 #define OTA_URL             "https://huertociencias.uma.es/esp8266-ota-update"
-#define HTTP_OTA_VERSION      String(__FILE__).substring(String(__FILE__).lastIndexOf('\\')+1) + ".doitESP32devkitV4" 
+#define HTTP_OTA_VERSION      String(__FILE__).substring(String(__FILE__).lastIndexOf('\\')+1) + ".esp32" 
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 0
 //#define __DEBUG__ true   //set to true for debug output, false for no debug ouput
