@@ -9,9 +9,6 @@
 #include <HTTPUpdate.h>
 #include <HTTPClient.h>
 #include "build_defs.h"
-#include <AsyncTCP.h>
-#include <ESPAsyncWebServer.h>
-#include <AsyncElegantOTA.h>
 
 /**********************************************************************
    VARS
@@ -20,7 +17,6 @@
 // ESP32  WiFi & UPDATE SERVER
 WiFiClientSecure espClient;
 PubSubClient client(espClient);
-AsyncWebServer server(80);
 
 const unsigned char FWVER[] =
 {
@@ -90,7 +86,6 @@ void setup()
   Serial.begin(115200);
   connectToNetwork();
   client.setServer(MQTT_SERVER, MQTT_PORT);
-  client.setCallback(callback);
   client.setBufferSize(512);
   checkForUpdates();
 
@@ -175,21 +170,6 @@ void captureAndSendMinuteSample() {
   checkForUpdates();
 }
 
-void sendDataEspFW() {
-  String clientId = "ESP32Client-";
-  uint32_t chipID = ESP.getEfuseMac();
-  clientId += String(chipID);
-  String topic_string = ("orchard/" + TYPE_NODE + "/" + clientId);                             // Select topic by ESP ID
-  const char* dataESPFW_topic = topic_string.c_str();
-  DynamicJsonDocument jsonRoot(2048);
-  String jsonString;
-  jsonRoot["HW"] = "ESP32-DEVKITC-V4";
-  jsonRoot["ChipID"] = espID;
-  jsonRoot["fw_ver"] = FWVER;
-  serializeJson(jsonRoot, jsonString);
-  client.publish(dataESPFW_topic, jsonString.c_str(), true);
-}
-
 String sendFullSamples(SensorsSample * samples, int samplesToSend) {
   for (int i = 0; i < samplesToSend; i++) {
     DynamicJsonDocument jsonRoot(2048);
@@ -262,7 +242,6 @@ void connectToNetwork() {
   Serial.println("WiFi conectado");
   Serial.println("Direccion IP: ");
   Serial.println(WiFi.localIP());
-  startUpdateServer();
   espClient.setInsecure();
   espClient.setTimeout(12);
 }
@@ -293,8 +272,7 @@ void reconnect() {
       // Nos suscribimos a los siguientes topics
 
       // Publicamos el estado de la conexion en el topic
-      client.publish(conexion_topic, "Online", true);
-      sendDataEspFW();
+
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -305,16 +283,6 @@ void reconnect() {
   }
   client.publish(conexion_topic, "Online", true);
 }
-
-void callback(char* topic, byte* payload, unsigned int length)
-{
-  Serial.print("Command from MQTT broker is : [");
-  Serial.print(topic);
-  Serial.println("] ");
-  char message_buff[100];
-}
-
-
 
 /***********************************************************************
    INTERRUPT FUNCTIONS
@@ -432,16 +400,6 @@ int meanAngle (int *angles, int size)
     else
       return (int)avgAngle;
   }
-}
-
-void startUpdateServer() {
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
-    request->send(200, "text/plain", "Hi! I am ESP32.");
-  });
-
-  AsyncElegantOTA.begin(&server);    // Start ElegantOTA
-  server.begin();
-  Serial.println("HTTP server started");
 }
 
 void checkForUpdates() {
