@@ -179,7 +179,7 @@ String sendFullSamples(SensorsSample * samples, int samplesToSend) {
     Counter1["SensorViento"] = samples[i].windCyclesPerMinute;
 
     jsonRoot["velocidad"] = (float)samples[i].windCyclesPerMinute * (float)ANEMOMETER_SPEED_FACTOR / (float)samples[i].elapsedSeconds;
-    jsonRoot["velocidadRafaga"] = samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR;
+    jsonRoot["velocidadRafaga"] = ((float)samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR) * 3.6;
     jsonRoot["direccion"] = samples[i].windAngle;
     jsonRoot["direccionRafaga"] = samples[i].gustAngle;
     jsonRoot["litros"] = samples[i].rainCyclesPerMinute * (float)RAIN_BUCKET_MM_PER_CYCLE;
