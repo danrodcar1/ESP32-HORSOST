@@ -1,3 +1,5 @@
+
+
 /**
    Recibe por serie un mensaje que también contiene la MAC del emisor original y lo publica en MQTT
    Publica en el topic infind/espnow/MAC en un servidor local 192.168.1.101
@@ -10,6 +12,7 @@
 #include "myDefines.h"
 #include "build_defs.h"
 #include <SimpleTimer.h> //repetitive tasks
+#include <EEPROM.h>
 
 //#include <WiFiClientSecure.h>
 //BearSSL::WiFiClientSecure espClient;
@@ -45,6 +48,13 @@ unsigned long heartBeat = 0;
 //Variable para controlar el tiempo.
 unsigned long lastMessage = 0;
 
+const int sizeLUT = 50;
+struct subtopicLUT {
+  const char* subtopic;
+}; subtopicLUT subLUT[sizeLUT];
+
+int eeAddress = 0;
+int indexLUT = 0;
 /**********************************************************************
   ARDUINO SETUP & MAIN LOOP
 ***********************************************************************/
@@ -79,7 +89,7 @@ void loop() {
   if (!client.connected()) reconnect();
   //Esta llamada para que la librería recupere el controlz
   client.loop();
-  
+
   readSerialAndPublicMQTT(rightNow);
   ESP.wdtFeed();
 
@@ -151,16 +161,20 @@ void reconnect() {
 void callback(char* topic, byte* payload, unsigned int length)
 {
   char message_buff[100];
-  int i;
-  for (i = 0; i < length; i++) {
-    message_buff[i] = payload[i];
+  for (int index = 0; index < sizeLUT; index++) {
+    if (strcmp(topic, subLUT[index].subtopic) == 0)
+    {
+      int i;
+      for (i = 0; i < length; i++) {
+        message_buff[i] = payload[i];
+      }
+      message_buff[i] = '\0';
+      String msgString = String(message_buff);
+      Serial.write("$$");
+      Serial.println(length);
+      Serial.println(msgString);
+    }
   }
-  message_buff[i] = '\0';
-  String msgString = String(message_buff);
-
-  Serial.write("$$");
-  Serial.println(length);
-  Serial.println(msgString);
 }
 
 
@@ -184,8 +198,8 @@ void readSerialAndPublicMQTT(unsigned long rightNow) {
         String datastr = serialmsg.substring(serialmsg.indexOf("/") + 1, serialmsg.length()) + '\0';
 
         //Build mqtt topic from incoming message and public
-        String mac_topic = ("orchard/" + TYPE_NODE + "/" + macaddr + "/datos");    // Select topic by ESP MAC
-        const char* send_topic = mac_topic.c_str();
+        String pub_topic = ("orchard/" + TYPE_NODE + "/" + macaddr + "/datos");    // Select topic by ESP MAC
+        const char* send_topic = pub_topic.c_str();
         sprintf(mensaje_mqtt, "{\"mac\":\"%s\",\"mensaje\":%s}", macaddr, datastr);
         client.publish(send_topic, mensaje_mqtt);
 
@@ -204,6 +218,23 @@ void readSerialAndPublicMQTT(unsigned long rightNow) {
         String macaddr = Serial.readStringUntil('/');
         String datastr = serialmsg.substring(serialmsg.indexOf("/") + 1, serialmsg.length()) + '\0';
 
+        //Save current MAC value in EEPROM if isn't repeated bro
+        String str;
+        if (EEPROM.get(eeAddress, str) != macaddr) {
+          EEPROM.put(eeAddress, macaddr);  //Grabamos el valor
+
+          //And create a sub topic
+          String sub_topic = ("orchard/" + TYPE_NODE + "/sub-" + macaddr + "/datos");    // Select topic by ESP MAC
+          const char* rcv_topic = sub_topic.c_str();
+          subLUT[indexLUT].subtopic = rcv_topic;
+          if (client.connected()) client.subscribe(subLUT[indexLUT].subtopic);
+          Serial.printf("\r\Suscribed to:\t%s", subLUT[indexLUT].subtopic);
+          indexLUT++;
+
+          eeAddress += sizeof(macaddr);  //Obtener la siguiente posicion para escribir
+          if (eeAddress >= EEPROM.length()) eeAddress = 0; //Comprobar que no hay desbordamiento
+        }
+
         //Build mqtt topic from incoming message and public
         String mac_topic = ("orchard/" + TYPE_NODE + "/" + macaddr + "/status");    // Select topic by ESP MAC
         const char* send_topic = mac_topic.c_str();
@@ -219,6 +250,7 @@ void readSerialAndPublicMQTT(unsigned long rightNow) {
     digitalWrite(LED_STATUS, LOW);
   }
 }
+
 
 //Método que devuelve 2 caracteres HEX para un byte.
 inline String byte2HEX (byte data)
