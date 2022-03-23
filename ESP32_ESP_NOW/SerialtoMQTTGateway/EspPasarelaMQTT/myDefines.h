@@ -4,7 +4,7 @@
 #define WIFI_SSID           "huerticawifi"
 #define WIFI_PASSWORD       "4cc3sshu3rt1c4"
 
-#define SET_SECURITY_CONNECTION    false
+
 
 
 #define OTA_URL             "https://huertociencias.uma.es/esp8266-ota-update"

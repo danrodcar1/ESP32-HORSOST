@@ -1,13 +1,12 @@
 /*
- * Este código comunica el ESP32 con otros ESP conectados por MAC y usando ESP-NOW como protocolo de comunicación.
- * MASTER MAC: {0x08, 0x3A, 0xF2, 0x6F, 0x13, 0x81}
- * Hacer referencia a MASTER_MAC en códigos para aplicar, así como PMK_KEY_STR / LMK_KEY_STR para intercambio seguro.
+   Este código comunica el ESP32 con otros ESP conectados por MAC y usando ESP-NOW como protocolo de comunicación.
+   MASTER MAC: {0x08, 0x3A, 0xF2, 0x6F, 0x13, 0x81}
+   Hacer referencia a MASTER_MAC en códigos para aplicar, así como PMK_KEY_STR / LMK_KEY_STR para intercambio seguro.
 */
 
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
-//#include <SoftwareSerial.h>
 #include "myDefines.h"
 #include "build_defs.h"
 #include <HTTPUpdate.h>
@@ -21,12 +20,12 @@
 ***********************************************************************/
 
 WiFiClientSecure espClient;
-//SoftwareSerial swSer(18, 19, false);
-HardwareSerial hwSer(1);
 
 // PMK and LMK keys
 uint8_t PMK_KEY_STR[16] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 uint8_t LMK_KEY_STR[16] = {0x33, 0x44, 0x33, 0x44, 0x33, 0x44, 0x33, 0x44, 0x33, 0x44, 0x33, 0x44, 0x33, 0x44, 0x33, 0x44};
+
+uint8_t gatewayCustomMac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33}; //Custom mac address for
 
 // Add below MAC from peers to connect with
 uint8_t mac_peer1[] = {0x3E, 0x33, 0x33, 0x33, 0x33, 0x34};
@@ -47,46 +46,109 @@ SimpleTimer timerManager; //timer declaration
 
 void IRAM_ATTR watchDogInterrupt();
 void watchDogRefresh();
+
+/**********************************************************************
+  ARDUINO SETUP & MAIN LOOP
+***********************************************************************/
+
+void setup()
+{
+  Serial.begin(115200);
+  //  connectToNetworkAndUpdate();
+  //Ponemos el WiFi en modo AP.
+  WiFi.mode(WIFI_AP);
+  //Establecemos la MAC para esta ESP
+  esp_wifi_set_mac(ESP_IF_WIFI_AP, gatewayCustomMac); // esp32 code
+  Serial.print("MAC: "); Serial.println(WiFi.softAPmacAddress());
+  //init watchdog
+  watchDogTimer = timerBegin(0, 80, true); //timer 0, div80
+  timerAttachInterrupt(watchDogTimer, &watchDogInterrupt, true);
+  timerAlarmWrite(watchDogTimer, WATCHDOG_TIMEOUT_S * 1000000, false);
+  timerAlarmEnable(watchDogTimer);
+  //
+  //  timerManager.setInterval(CHECK_UPDATE_TIMER * 60000L, connectToNetworkAndUpdate); // Look for update each 10'
+
+  //Inicializamos el LED.
+  pinMode(LED_STATUS, OUTPUT);
+  digitalWrite(LED_STATUS, LOW);
+
+  if (esp_now_init() != ESP_OK)
+  {
+    Serial.println("ESP NOW INIT FAILED.... REBOOT");
+    ESP.restart();
+  }
+  // Setting the PMK key
+  esp_now_set_pmk(PMK_KEY_STR);
+  addingMoreFriends();
+  //Si llega un mensaje por ESP-NOW a esta ESP, recogemos la información y la enviamos por serial.
+  esp_now_register_recv_cb(OnDataRecv);
+}
+
+void loop() {
+  timerManager.run();
+  checkSerialMessages();
+  watchDogRefresh();
+}
+
 /***********************************************************************
   OPERATIONAL FUNCTIONS
 ***********************************************************************/
+
+String deviceMac;
 // callback function that will be executed when data is received
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
   //Encendemos el LED
-  digitalWrite(LED_STATUS, HIGH);
-
-  //Preparamos el mensaje para enviarlo por serial. Añadimos la dirección MAC del dispositivo que envía la información.
-  //Si el tamaño del mensaje es mayor que 30, es un mensaje con información del sensor, no enviamos con el inicio de $$, si es el mensaje de que está vivo, lo enviamos con %% para diferenciarlos.
-  if (data_len > 31) {
-    Serial.write("$$");
+  //  digitalWrite(LED_STATUS, HIGH);
+  //
+  //  //Preparamos el mensaje para enviarlo por serial. Añadimos la dirección MAC del dispositivo que envía la información.
+  //  //Si el tamaño del mensaje es mayor que 30, es un mensaje con información del sensor, no enviamos con el inicio de $$, si es el mensaje de que está vivo, lo enviamos con %% para diferenciarlos.
+  //  if (data_len > 31) {
+  //    Serial.write("$$");
+  //  }
+  //  else {
+  //    Serial.write("%%");
+  //  }
+  //
+  //  Serial.write(mac_addr,20);
+  //  Serial.write(data_len);
+  //  Serial.write(data, data_len);
+  deviceMac = "";
+  for (int i = 0; i < 6; i++) deviceMac += byte2HEX(mac_addr[i]);
+  for (auto & c : deviceMac) c = toupper(c);
+  Serial.print(deviceMac);
+  Serial.println("=== Data ===");
+  Serial.print("Mac address: ");
+  for (int i = 0; i < 6; i++) {
+    Serial.print("0x");
+    Serial.print(mac_addr[i], HEX);
+    Serial.print(":");
   }
-  else {
-    Serial.write("%%");
-  }
-
-  Serial.write(mac_addr, 6);
-  Serial.write(data_len);
-  Serial.write(data, data_len);
-
+  Serial.printf("\r\nReceived\t%d Bytes\t%d", data_len, data[0]);
+  Serial.println();
   lastMessage = millis();
+}
+
+inline String byte2HEX (byte data)
+{
+  return (String(data, HEX).length() == 1) ? String("0") + String(data, HEX) : String(data, HEX);
 }
 
 //Método que se encarga de recoger lo que llega del protocolo serie y se envía por ESP-NOW al ESP.
 inline void readSerial() {
 
   //Obtenemos la longitud del JSON que vamos a recibir.
-  while (hwSer.available() < 2) {
+  while (Serial.available() < 2) {
     delay(1);
   }
-  int len1 = (hwSer.read() - 48) * 10;
-  int len2 = (hwSer.read() - 48);
+  int len1 = (Serial.read() - 48) * 10;
+  int len2 = (Serial.read() - 48);
   int len = len1 + len2 + 1;
 
   //Obtenemos el JSON
-  while (hwSer.available() < len) {
+  while (Serial.available() < len) {
     delay(1);
   }
-  hwSer.readBytes((char*)&JSON_serie, len);
+  Serial.readBytes((char*)&JSON_serie, len);
   JSON_serie[len] = '\0'; //fin de cadena, por si acaso
 
   //Enviamos el JSON por ESP_NOW
@@ -174,48 +236,6 @@ void checkForUpdates() {
   }
 }
 
-/**********************************************************************
-  ARDUINO SETUP & MAIN LOOP
-***********************************************************************/
-
-void setup()
-{
-  Serial.begin(115200);
-  connectToNetworkAndUpdate();
-
-  //init watchdog
-  watchDogTimer = timerBegin(0, 80, true); //timer 0, div80
-  timerAttachInterrupt(watchDogTimer, &watchDogInterrupt, true);
-  timerAlarmWrite(watchDogTimer, WATCHDOG_TIMEOUT_S * 1000000, false);
-  timerAlarmEnable(watchDogTimer);
-
-  timerManager.setInterval(CHECK_UPDATE_TIMER * 60000L, connectToNetworkAndUpdate); // Look for update each 10'
-
-  //Inicializamos el LED.
-  pinMode(LED_STATUS, OUTPUT);
-  digitalWrite(LED_STATUS, LOW);
-
-  //init hwSerial
-  hwSer.begin(SERIAL_BAUD_RATE, SERIAL_8N1,17,16);
-  
-  if (esp_now_init() != ESP_OK)
-  {
-    Serial.println("ESP NOW INIT FAILED.... REBOOT");
-    ESP.restart();
-  }
-  // Setting the PMK key
-  esp_now_set_pmk(PMK_KEY_STR);
-  addingMoreFriends();
-  //Si llega un mensaje por ESP-NOW a esta ESP, recogemos la información y la enviamos por serial.
-  esp_now_register_recv_cb(OnDataRecv);
-}
-
-void loop() {
-  timerManager.run();
-  checkSerialMessages();
-  watchDogRefresh();
-}
-
 
 /***********************************************************************
    INTERRUPT FUNCTIONS
@@ -247,13 +267,13 @@ void checkSerialMessages() {
   }
 
   //Si tenemos algún mensaje por serie, entramos en el bucle.
-  while (hwSer.available()) {
+  while (Serial.available()) {
     //Comprobamos si viene primero el icono '$'
-    if ( hwSer.read() == '$' ) {
+    if ( Serial.read() == '$' ) {
       //En caso de venir ese icono, comprobamos que el segundo sera también '$'. En caso de ser, es un JSON con información del sensor y vamos a proceder a leerlo.
-      while ( ! hwSer.available() )  delay(1);
+      while ( ! Serial.available() )  delay(1);
 
-      if ( hwSer.read() == '$' ) {
+      if ( Serial.read() == '$' ) {
         //Leemos los datos.
         readSerial();
         lastMessage = rightNow;
