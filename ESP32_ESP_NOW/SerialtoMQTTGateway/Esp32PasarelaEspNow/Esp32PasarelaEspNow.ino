@@ -94,44 +94,17 @@ void loop() {
   OPERATIONAL FUNCTIONS
 ***********************************************************************/
 
-String deviceMac;
+
 // callback function that will be executed when data is received
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
-  //Encendemos el LED
-  //  digitalWrite(LED_STATUS, HIGH);
-  //
-  //  //Preparamos el mensaje para enviarlo por serial. Añadimos la dirección MAC del dispositivo que envía la información.
-  //  //Si el tamaño del mensaje es mayor que 30, es un mensaje con información del sensor, no enviamos con el inicio de $$, si es el mensaje de que está vivo, lo enviamos con %% para diferenciarlos.
-  //  if (data_len > 31) {
-  //    Serial.write("$$");
-  //  }
-  //  else {
-  //    Serial.write("%%");
-  //  }
-  //
-  //  Serial.write(mac_addr,20);
-  //  Serial.write(data_len);
-  //  Serial.write(data, data_len);
-  deviceMac = "";
-  for (int i = 0; i < 6; i++) deviceMac += byte2HEX(mac_addr[i]);
-  for (auto & c : deviceMac) c = toupper(c);
-  Serial.print(deviceMac);
-  Serial.println("=== Data ===");
-  Serial.print("Mac address: ");
-  for (int i = 0; i < 6; i++) {
-    Serial.print("0x");
-    Serial.print(mac_addr[i], HEX);
-    Serial.print(":");
-  }
-  Serial.printf("\r\nReceived\t%d Bytes\t%d", data_len, data[0]);
-  Serial.println();
+  Serial.write("$$");
+  Serial.write(mac_addr, 6);
+  Serial.write(data_len);
+  Serial.write(data, data_len);
   lastMessage = millis();
 }
 
-inline String byte2HEX (byte data)
-{
-  return (String(data, HEX).length() == 1) ? String("0") + String(data, HEX) : String(data, HEX);
-}
+
 
 //Método que se encarga de recoger lo que llega del protocolo serie y se envía por ESP-NOW al ESP.
 inline void readSerial() {

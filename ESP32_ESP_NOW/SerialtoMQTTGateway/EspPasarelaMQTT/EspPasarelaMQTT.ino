@@ -35,26 +35,18 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 SimpleTimer timerManager; //timer declaration
 
-//Cadenas para topics e ID.
-uint8_t macAddr[6];
-
-char topic_PUB[256];
-char mensaje_mqtt[512];
-char JSON_serie[256];
-String deviceMac;
-
 //Variable para controlar el aviso de "Esperando mensajes ESP-NOW".
 unsigned long heartBeat = 0;
 //Variable para controlar el tiempo.
 unsigned long lastMessage = 0;
 
-const int sizeLUT = 50;
-struct subtopicLUT {
-  const char* subtopic;
-}; subtopicLUT subLUT[sizeLUT];
+struct serialReceived {
+  String macaddr;
+  byte len;
+  String message;
+  String topic;
+};
 
-int eeAddress = 0;
-int indexLUT = 0;
 /**********************************************************************
   ARDUINO SETUP & MAIN LOOP
 ***********************************************************************/
@@ -76,8 +68,8 @@ void setup() {
 
 
   //Inicializamos el LED y el ID de la placa.
-  pinMode(LED_STATUS, OUTPUT);
-  digitalWrite(LED_STATUS, LOW);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
 }
 
 void loop() {
@@ -92,7 +84,6 @@ void loop() {
 
   readSerialAndPublicMQTT(rightNow);
   ESP.wdtFeed();
-
 }
 
 /***********************************************************************
@@ -129,6 +120,8 @@ void reconnect() {
   String topic_string_connect = ("orchard/" + TYPE_NODE + "/" + clientId + "/connection");      // Select topic by ESP ID : connection
   const char* conexion_topic = topic_string_connect.c_str();
 
+  String topic_string_sub = ("orchard/" + TYPE_NODE);      // Select topic by ESP ID : connection
+  const char* publicTopic = topic_string_sub.c_str();
 
   // BUCLE DE CHECKING DE CONEXIÓN AL SERVICIO MQTT
   while (!client.connected()) {
@@ -145,7 +138,9 @@ void reconnect() {
     if (client.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD, conexion_topic, 2, true, "Offline", true)) {
       Serial.println("conectado");
       // Nos suscribimos a los siguientes topics
-
+      client.subscribe(publicTopic);
+      Serial.printf("\r\Subscribed to:\t%s", publicTopic);
+      Serial.println();
       // Publicamos el estado de la conexion en el topic
       client.publish(conexion_topic, "Online", true);
     } else {
@@ -160,20 +155,21 @@ void reconnect() {
 
 void callback(char* topic, byte* payload, unsigned int length)
 {
+  Serial.print("Command from MQTT broker is : [");
+  Serial.print(topic);
+  Serial.println("] ");
   char message_buff[100];
-  for (int index = 0; index < sizeLUT; index++) {
-    if (strcmp(topic, subLUT[index].subtopic) == 0)
-    {
-      int i;
-      for (i = 0; i < length; i++) {
-        message_buff[i] = payload[i];
-      }
-      message_buff[i] = '\0';
-      String msgString = String(message_buff);
-      Serial.write("$$");
-      Serial.println(length);
-      Serial.println(msgString);
+  if (strcmp(topic, "orchard/espnow") == 0)
+  {
+    int i;
+    for (i = 0; i < length; i++) {
+      message_buff[i] = payload[i];
     }
+    message_buff[i] = '\0';
+    String msgString = String(message_buff);
+    Serial.write("$$");
+    Serial.println(length);
+    Serial.println(msgString);
   }
 }
 
@@ -184,6 +180,7 @@ void callback(char* topic, byte* payload, unsigned int length)
 ***********************************************************************/
 
 void readSerialAndPublicMQTT(unsigned long rightNow) {
+  serialReceived readSerial;
   //Si tenemos algún mensaje por serie, entramos en el bucle.
   while (Serial.available()) {
     //Comprobamos si vienen mensajes con datos, empiezan con '$$'
@@ -191,68 +188,54 @@ void readSerialAndPublicMQTT(unsigned long rightNow) {
       while ( ! Serial.available() )  delay(1);
       if ( Serial.read() == '$' ) {
         //Enciende el led al enviar mensaje
-        digitalWrite(LED_STATUS, HIGH);
-        //Extrac MAC and data from Serial : MAC/{data}
-        String serialmsg = Serial.readString();
-        String macaddr = Serial.readStringUntil('/');
-        String datastr = serialmsg.substring(serialmsg.indexOf("/") + 1, serialmsg.length()) + '\0';
-
+        digitalWrite(LED_BUILTIN, HIGH);
+        //Extrac MAC, topic and data from Serial : MAC/{data}
+        readSerial = readFromSerial();
         //Build mqtt topic from incoming message and public
-        String pub_topic = ("orchard/" + TYPE_NODE + "/" + macaddr + "/datos");    // Select topic by ESP MAC
+        String pub_topic = ("orchard/" + TYPE_NODE + "/" + readSerial.macaddr + "/" + readSerial.topic);    // Select topic by ESP MAC
         const char* send_topic = pub_topic.c_str();
-        sprintf(mensaje_mqtt, "{\"mac\":\"%s\",\"mensaje\":%s}", macaddr, datastr);
+        char mensaje_mqtt[512];
+        sprintf(mensaje_mqtt, "{\"mac\":\"%s\",\"mensaje\":%s}", readSerial.macaddr.c_str(), readSerial.message.c_str());
         client.publish(send_topic, mensaje_mqtt);
-
-        lastMessage = rightNow;
-      }
-    }
-
-    //Comprobamos si vienen mensajes de estado, empiezan con '%%'
-    if ( Serial.read() == '%' ) {
-      while ( ! Serial.available() )  delay(1);
-      if ( Serial.read() == '%' ) {
-        //Enciende el led al enviar mensaje
-        digitalWrite(LED_STATUS, HIGH);
-        //Extrac MAC and data from Serial : MAC/{status}
-        String serialmsg = Serial.readString();
-        String macaddr = Serial.readStringUntil('/');
-        String datastr = serialmsg.substring(serialmsg.indexOf("/") + 1, serialmsg.length()) + '\0';
-
-        //Save current MAC value in EEPROM if isn't repeated bro
-        String str;
-        if (EEPROM.get(eeAddress, str) != macaddr) {
-          EEPROM.put(eeAddress, macaddr);  //Grabamos el valor
-
-          //And create a sub topic
-          String sub_topic = ("orchard/" + TYPE_NODE + "/sub-" + macaddr + "/datos");    // Select topic by ESP MAC
-          const char* rcv_topic = sub_topic.c_str();
-          subLUT[indexLUT].subtopic = rcv_topic;
-          if (client.connected()) client.subscribe(subLUT[indexLUT].subtopic);
-          Serial.printf("\r\Suscribed to:\t%s", subLUT[indexLUT].subtopic);
-          indexLUT++;
-
-          eeAddress += sizeof(macaddr);  //Obtener la siguiente posicion para escribir
-          if (eeAddress >= EEPROM.length()) eeAddress = 0; //Comprobar que no hay desbordamiento
-        }
-
-        //Build mqtt topic from incoming message and public
-        String mac_topic = ("orchard/" + TYPE_NODE + "/" + macaddr + "/status");    // Select topic by ESP MAC
-        const char* send_topic = mac_topic.c_str();
-        sprintf(mensaje_mqtt, "{\"mac\":\"%s\",\"mensaje\":%s}", macaddr, datastr);
-        client.publish(send_topic, mensaje_mqtt);
-
         lastMessage = rightNow;
       }
     }
   }
   //Si el LED está encendido porque se ha enviado un mensaje por el protocolo serie y hace más de 0,2s que está encedido, se apaga.
-  if (digitalRead(LED_STATUS) == HIGH && rightNow - lastMessage >= 200) {
-    digitalWrite(LED_STATUS, LOW);
+  if (digitalRead(LED_BUILTIN) == HIGH && rightNow - lastMessage >= 200) {
+    digitalWrite(LED_BUILTIN, LOW);
   }
 }
 
+serialReceived readFromSerial() {
+  serialReceived readSerial;
+  //Obtenemos la dirección MAC.
+  while (Serial.available() < 6) {
+    delay(1);
+  }
+  for (int i = 0; i < 6; i++) readSerial.macaddr += byte2HEX(Serial.read());
+  for (auto & c : readSerial.macaddr) c = toupper(c);
 
-//Método que devuelve 2 caracteres HEX para un byte.
+  //Obtenemos la longitud del mensaje que vamos a recibir.
+  while (Serial.available() < 1) {
+    delay(1);
+  }
+  readSerial.len = Serial.read();
+
+  //Obtenemos el mensaje formado como topic|mensaje
+  char message[readSerial.len];
+  while (Serial.available() < readSerial.len) {
+    delay(1);
+  }
+  Serial.readBytes(message, readSerial.len);
+  message[readSerial.len] = '\0'; //fin de cadena, por si acaso
+  String serialmsg = String(message);
+  readSerial.topic = serialmsg.substring(0, serialmsg.indexOf("|")) + '\0';
+  readSerial.message = serialmsg.substring(serialmsg.indexOf("|") + 1, readSerial.len) + '\0';
+  return readSerial;
+}
+
+//Byte to hex converter
 inline String byte2HEX (byte data)
 {
   return (String(data, HEX).length() == 1) ? String("0") + String(data, HEX) : String(data, HEX);
