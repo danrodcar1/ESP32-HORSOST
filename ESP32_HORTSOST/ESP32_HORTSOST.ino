@@ -38,8 +38,6 @@ const unsigned char FWVER[] =
   '\0'
 };
 
-char espID[32];
-
 hw_timer_t * watchDogTimer = NULL; //watchdog timer declaration
 SimpleTimer timerManager; //timer declaration
 
@@ -66,6 +64,9 @@ struct SensorsSample {
   unsigned long  sampleMillis;
 };
 
+String maintenanceTopic;
+bool maintenanceState = false;
+
 SensorsSample avgMinuteSamplesLog[WIND_AVG_MINUTE_LOG_SIZE];
 WindSample windSamples[WIND_SAMPLES_SIZE];
 
@@ -77,6 +78,7 @@ int AN_Pot1_Filtered = 0;
 void IRAM_ATTR watchDogInterrupt();
 void watchDogRefresh();
 
+unsigned long previousMillis;
 /**********************************************************************
   ARDUINO SETUP & MAIN LOOP
 ***********************************************************************/
@@ -86,6 +88,7 @@ void setup()
   Serial.begin(115200);
   connectToNetwork();
   client.setServer(MQTT_SERVER, MQTT_PORT);
+  client.setCallback(callback);
   client.setBufferSize(512);
   checkForUpdates();
 
@@ -108,17 +111,110 @@ void setup()
 
 void loop()
 {
-  timerManager.run();
+  unsigned long currentMillis = millis();
   if (!client.connected()) {
     reconnect();
   }
   client.loop();
+  if ((maintenanceState == true) && ((unsigned long)(currentMillis - previousMillis) >= MAINTENANCE_MAX_MINUTES * 60000L)) {
+    maintenanceState = false;
+    previousMillis = millis();
+  }
+  timerManager.run();
   watchDogRefresh();
 }
 
 /***********************************************************************
   OPERATIONAL FUNCTIONS
 ***********************************************************************/
+
+void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
+  Serial.println("Disconnected from WiFi access point");
+  Serial.print("WiFi lost connection. Reason: ");
+  Serial.println(info.disconnected.reason);
+  Serial.println("Trying to Reconnect");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+void connectToNetwork() {
+  WiFi.onEvent(WiFiStationDisconnected, SYSTEM_EVENT_STA_DISCONNECTED);
+  delay(10);
+  Serial.println();
+  Serial.print("Conectando a ");
+  Serial.println(WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(200);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi conectado");
+  Serial.println("Direccion IP: ");
+  Serial.println(WiFi.localIP());
+  espClient.setInsecure();
+  espClient.setTimeout(12);
+}
+
+void reconnect() {
+  String clientId = "ESP32Client-";
+  uint32_t chipID = ESP.getEfuseMac();
+  clientId += String(chipID);
+  String topic_string = ("orchard/" + TYPE_NODE + "/" + clientId + "/connection");                             // Select topic by ESP ID
+  const char* conexion_topic = topic_string.c_str();
+
+  String topic_string_sub = ("orchard/" + TYPE_NODE + "/" + clientId + "/mantenimiento");     // Select topic by ESP ID
+  maintenanceTopic = topic_string_sub;
+  const char* subTopic = topic_string_sub.c_str();
+  // BUCLE DE CHECKING DE CONEXIÓN AL SERVICIO MQTT
+  while (!client.connected()) {
+    Serial.print("Intentando conectarse a MQTT...");
+    Serial.print("Conectando a ");
+    Serial.print(MQTT_SERVER);
+    Serial.print(" como ");
+    Serial.println(clientId);
+
+    // Intentando conectar
+    if (client.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD, conexion_topic, 2, true, "Offline", true)) {
+      Serial.println("conectado");
+      // Nos suscribimos a los siguientes topics
+      client.subscribe(subTopic);
+      Serial.printf("\r\Subscribed to:\t%s", subTopic);
+      Serial.println();
+      // Publicamos el estado de la conexion en el topic
+      client.publish(conexion_topic, "Online", true);
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Espera 5s antes de reintentar conexión
+      delay(5000);
+    }
+  }
+}
+
+void callback(char* topic, byte* payload, unsigned int length)
+{
+  Serial.print("Command from MQTT broker is : [");
+  Serial.print(topic);
+  Serial.println("] ");
+  char message_buff[100];
+  if (strcmp(topic, maintenanceTopic.c_str()) == 0)
+  {
+    int i;
+    for (i = 0; i < length; i++) {
+      message_buff[i] = payload[i];
+    }
+    message_buff[i] = '\0';
+    String msgString = String(message_buff);
+    if (msgString.equals("true")){
+      maintenanceState = true;
+      previousMillis = millis();
+    }
+    if (msgString.equals("false")) maintenanceState = false;
+  }
+}
 
 void captureAndSendPartialSample() {
 
@@ -178,8 +274,9 @@ String sendFullSamples(SensorsSample * samples, int samplesToSend) {
     Counter1["SensorLluvia"] = samples[i].rainCyclesPerMinute;
     Counter1["SensorViento"] = samples[i].windCyclesPerMinute;
 
-    jsonRoot["velocidad"] = (float)samples[i].windCyclesPerMinute * (float)ANEMOMETER_SPEED_FACTOR / (float)samples[i].elapsedSeconds;
-    jsonRoot["velocidadRafaga"] = ((float)samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR) * 3.6;
+    //    jsonRoot["velocidad"] = (float)samples[i].windCyclesPerMinute * (float)ANEMOMETER_SPEED_FACTOR / (float)samples[i].elapsedSeconds;
+    jsonRoot["velocidad"] = (samples[i].windCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR) * 3.6;
+    jsonRoot["velocidadRafaga"] = (samples[i].gustCyclesPerSecond / (float)ANEMOMETER_CYCLES_PER_LOOP * (float)ANEMOMETER_CIRCUMFERENCE_MTS * (float)ANEMOMETER_SPEED_FACTOR) * 3.6;
     jsonRoot["direccion"] = samples[i].windAngle;
     jsonRoot["direccionRafaga"] = samples[i].gustAngle;
     jsonRoot["litros"] = samples[i].rainCyclesPerMinute * (float)RAIN_BUCKET_MM_PER_CYCLE;
@@ -215,75 +312,6 @@ uint32_t readADC_Avg(int ADC_Raw)
   return (Sum / FILTER_LEN);
 }
 
-
-
-void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
-  Serial.println("Disconnected from WiFi access point");
-  Serial.print("WiFi lost connection. Reason: ");
-  Serial.println(info.disconnected.reason);
-  Serial.println("Trying to Reconnect");
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-}
-
-void connectToNetwork() {
-  WiFi.onEvent(WiFiStationDisconnected, SYSTEM_EVENT_STA_DISCONNECTED);
-  delay(10);
-  Serial.println();
-  Serial.print("Conectando a ");
-  Serial.println(WIFI_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(200);
-    Serial.print(".");
-  }
-  Serial.println("");
-  Serial.println("WiFi conectado");
-  Serial.println("Direccion IP: ");
-  Serial.println(WiFi.localIP());
-  espClient.setInsecure();
-  espClient.setTimeout(12);
-}
-
-void reconnect() {
-  String clientId = "ESP32Client-";
-  uint32_t chipID = ESP.getEfuseMac();
-  clientId += String(chipID);
-  clientId.toCharArray(espID, 32);
-  String topic_string = ("orchard/" + TYPE_NODE + "/" + clientId + "/connection");                             // Select topic by ESP ID
-  const char* conexion_topic = topic_string.c_str();
-  // BUCLE DE CHECKING DE CONEXIÓN AL SERVICIO MQTT
-  while (!client.connected()) {
-    Serial.print("Intentando conectarse a MQTT...");
-
-    // Generación del nombre del cliente en función de la dirección MAC y los ultimos 8 bits del contador temporal
-
-    Serial.print("Conectando a ");
-    Serial.print(MQTT_SERVER);
-    Serial.print(" como ");
-    Serial.println(clientId);
-
-    // Intentando conectar
-    if (client.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD, conexion_topic, 2, true, "Offline", true)) {
-      Serial.println("conectado");
-      // Check IOTfingerprint
-
-      // Nos suscribimos a los siguientes topics
-
-      // Publicamos el estado de la conexion en el topic
-
-    } else {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-      // Espera 5s antes de reintentar conexión
-      delay(5000);
-    }
-  }
-  client.publish(conexion_topic, "Online", true);
-}
-
 /***********************************************************************
    INTERRUPT FUNCTIONS
 ***********************************************************************/
@@ -299,9 +327,11 @@ void watchDogRefresh()
 }
 
 void countRainCycles() {
-  if (nextTimeRainIterrupt == 0 || nextTimeRainIterrupt < millis()) {
-    rainCyclesCounter++;
-    nextTimeRainIterrupt = millis() + 100;
+  if (maintenanceState == false) {
+    if (nextTimeRainIterrupt == 0 || nextTimeRainIterrupt < millis()) {
+      rainCyclesCounter++;
+      nextTimeRainIterrupt = millis() + 100;
+    }
   }
 }
 

@@ -32,6 +32,8 @@
 #define WIND_SAMPLES_SIZE 6 //this value MUST be 60secs/WIND_SAMPLING_SECONDS, eg. 60/6 => 10=WIND_SAMPLES_SIZE
 #define WIND_AVG_MINUTE_LOG_SIZE 18 //this MUST be equal or greater than 1 to store the current sample
 
+#define MAINTENANCE_MAX_MINUTES 15L
+
 /**********************************************************************
   WIND/RAIN CALIBRATION VALUES - SPEED, RAIN & WIND ANGLE
 ***********************************************************************/
