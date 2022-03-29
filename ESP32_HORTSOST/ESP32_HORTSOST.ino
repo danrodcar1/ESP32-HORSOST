@@ -64,8 +64,14 @@ struct SensorsSample {
   unsigned long  sampleMillis;
 };
 
+// Maintenance things to stop rain counter and clean the pluviometer
 String maintenanceTopic;
 bool maintenanceState = false;
+unsigned long maintenanceMillis;
+
+String firstWaterDropeTopic;
+bool firstWaterDrope = false;
+unsigned long firstWaterDropeMillis;
 
 SensorsSample avgMinuteSamplesLog[WIND_AVG_MINUTE_LOG_SIZE];
 WindSample windSamples[WIND_SAMPLES_SIZE];
@@ -78,7 +84,7 @@ int AN_Pot1_Filtered = 0;
 void IRAM_ATTR watchDogInterrupt();
 void watchDogRefresh();
 
-unsigned long previousMillis;
+
 /**********************************************************************
   ARDUINO SETUP & MAIN LOOP
 ***********************************************************************/
@@ -116,10 +122,19 @@ void loop()
     reconnect();
   }
   client.loop();
-  if ((maintenanceState == true) && ((unsigned long)(currentMillis - previousMillis) >= MAINTENANCE_MAX_MINUTES * 60000L)) {
+
+  // if we forget to stop the maintenance, it stops automatically after 15 minutes
+  if ((maintenanceState == true) && ((unsigned long)(currentMillis - maintenanceMillis) >= MAINTENANCE_MAX_MINUTES * 60000L)) {
     maintenanceState = false;
-    previousMillis = millis();
+    maintenanceMillis = millis();
   }
+
+  // every 10' I check rain status in case it has started to rain again
+  if (rainCyclesCounter == 0 && firstWaterDrope == true) {
+    firstWaterDrope = false;
+    client.publish(firstWaterDropeTopic.c_str(), "noDrop", true);
+  }
+  
   timerManager.run();
   watchDogRefresh();
 }
@@ -167,6 +182,10 @@ void reconnect() {
   String topic_string_sub = ("orchard/" + TYPE_NODE + "/" + clientId + "/mantenimiento");     // Select topic by ESP ID
   maintenanceTopic = topic_string_sub;
   const char* subTopic = topic_string_sub.c_str();
+
+  String topic_string_rain = ("orchard/" + TYPE_NODE + "/" + clientId + "/israining");     // Select topic by ESP ID
+  firstWaterDropeTopic = topic_string_rain;
+
   // BUCLE DE CHECKING DE CONEXIÓN AL SERVICIO MQTT
   while (!client.connected()) {
     Serial.print("Intentando conectarse a MQTT...");
@@ -200,6 +219,7 @@ void callback(char* topic, byte* payload, unsigned int length)
   Serial.print(topic);
   Serial.println("] ");
   char message_buff[100];
+  //If we request maintenance, we stop the rain meter
   if (strcmp(topic, maintenanceTopic.c_str()) == 0)
   {
     int i;
@@ -208,9 +228,9 @@ void callback(char* topic, byte* payload, unsigned int length)
     }
     message_buff[i] = '\0';
     String msgString = String(message_buff);
-    if (msgString.equals("true")){
+    if (msgString.equals("true")) {
       maintenanceState = true;
-      previousMillis = millis();
+      maintenanceMillis = millis();
     }
     if (msgString.equals("false")) maintenanceState = false;
   }
@@ -327,9 +347,16 @@ void watchDogRefresh()
 }
 
 void countRainCycles() {
+  //If we request maintenance, we stop the rain meter.- maintenanceState = true --> stop rainmeter
   if (maintenanceState == false) {
     if (nextTimeRainIterrupt == 0 || nextTimeRainIterrupt < millis()) {
       rainCyclesCounter++;
+      // tells us when it starts to rain
+      if (rainCyclesCounter == 1 && firstWaterDrope == false) {
+        firstWaterDrope = true;
+        firstWaterDropeMillis = millis();
+        client.publish(firstWaterDropeTopic.c_str(), "firstDrop", true);
+      }
       nextTimeRainIterrupt = millis() + 100;
     }
   }

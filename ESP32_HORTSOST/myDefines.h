@@ -33,7 +33,7 @@
 #define WIND_AVG_MINUTE_LOG_SIZE 18 //this MUST be equal or greater than 1 to store the current sample
 
 #define MAINTENANCE_MAX_MINUTES 15L
-
+#define RAIN_WATCHDOG_MAX_MINUTES 30L
 /**********************************************************************
   WIND/RAIN CALIBRATION VALUES - SPEED, RAIN & WIND ANGLE
 ***********************************************************************/
