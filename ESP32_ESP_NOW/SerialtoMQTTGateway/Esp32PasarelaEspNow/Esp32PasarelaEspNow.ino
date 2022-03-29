@@ -33,8 +33,13 @@ uint8_t mac_peer2[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 esp_now_peer_info_t peer1;
 esp_now_peer_info_t peer2;
 
-//char para construir el mensaje que se va a enviar por ESP-NOW
-char JSON_serie[256];
+struct serialReceived {
+  String macaddr;
+  byte len;
+  String message;
+  String topic;
+  String packet;
+};
 
 //Variable para controlar el tiempo.
 volatile unsigned long lastMessage = 0;
@@ -54,7 +59,7 @@ void watchDogRefresh();
 void setup()
 {
   Serial.begin(115200);
-  //  connectToNetworkAndUpdate();
+  connectToNetworkAndUpdate();
   //Ponemos el WiFi en modo AP.
   WiFi.mode(WIFI_AP);
   //Establecemos la MAC para esta ESP
@@ -65,12 +70,8 @@ void setup()
   timerAttachInterrupt(watchDogTimer, &watchDogInterrupt, true);
   timerAlarmWrite(watchDogTimer, WATCHDOG_TIMEOUT_S * 1000000, false);
   timerAlarmEnable(watchDogTimer);
-  //
-  //  timerManager.setInterval(CHECK_UPDATE_TIMER * 60000L, connectToNetworkAndUpdate); // Look for update each 10'
 
-  //Inicializamos el LED.
-  pinMode(LED_STATUS, OUTPUT);
-  digitalWrite(LED_STATUS, LOW);
+  //  timerManager.setInterval(CHECK_UPDATE_TIMER * 60000L, connectToNetworkAndUpdate); // Look for update each 10'
 
   if (esp_now_init() != ESP_OK)
   {
@@ -82,11 +83,14 @@ void setup()
   addingMoreFriends();
   //Si llega un mensaje por ESP-NOW a esta ESP, recogemos la información y la enviamos por serial.
   esp_now_register_recv_cb(OnDataRecv);
+  // We will register the callback function to respond to the event
+  esp_now_register_send_cb(OnDataSent);
 }
 
 void loop() {
+  unsigned long rightNow = millis();
   timerManager.run();
-  checkSerialMessages();
+  readSerialtoEspnow(rightNow);
   watchDogRefresh();
 }
 
@@ -94,6 +98,30 @@ void loop() {
   OPERATIONAL FUNCTIONS
 ***********************************************************************/
 
+void readSerialtoEspnow(unsigned long rightNow) {
+  serialReceived readSerial;
+  //Si la diferencia desde el último heartBeat hasta rightNow es de más de 30 segundos, mostramos un mensaje para hacer referencia que estamos esperando un mensaje de ESP-NOW.
+  if (rightNow - heartBeat > 30000) {
+    Serial.println("\nEsperando mensajes ESP-NOW...");
+    heartBeat = rightNow;
+  }
+
+  //Si tenemos algún mensaje por serie, entramos en el bucle.
+  while (Serial.available()) {
+    //Comprobamos si viene primero el icono '$'
+    if ( Serial.read() == '$' ) {
+      while ( ! Serial.available() )  delay(1);
+      if ( Serial.read() == '$' ) {
+        //Leemos los datos.
+        //Extrac MAC, topic and data from Serial : MAC/{data}
+        readSerial = readFromSerial();
+        //Enviamos por ESP_NOW
+        esp_now_send((uint8_t*)HexString2ASCIIString(readSerial.macaddr).c_str(), (uint8_t*)readSerial.packet.c_str(), 250);
+        lastMessage = rightNow;
+      }
+    }
+  }
+}
 
 // callback function that will be executed when data is received
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
@@ -104,29 +132,48 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
   lastMessage = millis();
 }
 
-
-
-//Método que se encarga de recoger lo que llega del protocolo serie y se envía por ESP-NOW al ESP.
-inline void readSerial() {
-
-  //Obtenemos la longitud del JSON que vamos a recibir.
-  while (Serial.available() < 2) {
-    delay(1);
+// Callback to have a track of sent messages
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.println();
+  Serial.println("=== Data Sent to ===");
+  Serial.print("Mac address: ");
+  for (int i = 0; i < 6; i++) {
+    Serial.print("0x");
+    Serial.print(mac_addr[i], HEX);
+    if (i < 5)    Serial.print(":");
   }
-  int len1 = (Serial.read() - 48) * 10;
-  int len2 = (Serial.read() - 48);
-  int len = len1 + len2 + 1;
-
-  //Obtenemos el JSON
-  while (Serial.available() < len) {
-    delay(1);
-  }
-  Serial.readBytes((char*)&JSON_serie, len);
-  JSON_serie[len] = '\0'; //fin de cadena, por si acaso
-
-  //Enviamos el JSON por ESP_NOW
-  esp_now_send(mac_peer1, (uint8_t *) JSON_serie, strlen(JSON_serie) + 1);
+  Serial.print("\r\nSend message status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Sent Successfully" : "Sent Failed");
 }
+
+serialReceived readFromSerial() {
+  serialReceived readSerial;
+  //Obtenemos la dirección MAC.
+  while (Serial.available() < 6) {
+    delay(1);
+  }
+  for (int i = 0; i < 6; i++) readSerial.macaddr += byte2HEX(Serial.read());
+  for (auto & c : readSerial.macaddr) c = toupper(c);
+  //Obtenemos la longitud del mensaje que vamos a recibir.
+  while (Serial.available() < 1) {
+    delay(1);
+  }
+  readSerial.len = Serial.read();
+  //Obtenemos el mensaje formado como topic|mensaje
+  char message[readSerial.len];
+  while (Serial.available() < readSerial.len) {
+    delay(1);
+  }
+  Serial.readBytes(message, readSerial.len);
+  message[readSerial.len] = '\0'; //fin de cadena, por si acaso
+  readSerial.packet = String(message);
+  readSerial.topic = readSerial.packet.substring(0, readSerial.packet.indexOf("|")) + '\0';
+  readSerial.message = readSerial.packet.substring(readSerial.packet.indexOf("|") + 1, readSerial.len) + '\0';
+  return readSerial;
+}
+
+
+
 
 void addingMoreFriends() {
   //adding encrypted friends
@@ -137,6 +184,7 @@ void addingMoreFriends() {
     peer1.lmk[i] = LMK_KEY_STR[i];
   }
   peer1.encrypt = true;
+  peer1.ifidx = ESP_IF_WIFI_AP; //CLAVE
   // Register the peer
   Serial.println("Registering a peer 1");
   if ( esp_now_add_peer(&peer1) != ESP_OK) {
@@ -189,8 +237,6 @@ void connectToNetworkAndUpdate() {
   espClient.setTimeout(12);
   checkForUpdates();
   WiFi.disconnect();
-  WiFi.mode(WIFI_AP);
-  Serial.print("MAC: "); Serial.println(WiFi.softAPmacAddress());
 }
 
 
@@ -224,36 +270,28 @@ void watchDogRefresh()
   timerWrite(watchDogTimer, 0); //reset timer (feed watchdog)
 }
 
-void checkSerialMessages() {
-  //Obtenemos el momento actual.
-  unsigned long rightNow = millis();
 
-  //Si la diferencia desde el último heartBeat hasta rightNow es de más de 30 segundos, mostramos un mensaje para hacer referencia que estamos esperando un mensaje de ESP-NOW.
-  if (rightNow - heartBeat > 30000) {
-    Serial.println("\nEsperando mensajes ESP-NOW...");
-    heartBeat = rightNow;
-  }
-
-  //Si el LED está encendido porque se ha enviado un mensaje por el protocolo serie y hace más de 0,2s que está encedido, se apaga.
-  if (digitalRead(LED_STATUS) == HIGH && rightNow - lastMessage >= 200) {
-    digitalWrite(LED_STATUS, LOW);
-  }
-
-  //Si tenemos algún mensaje por serie, entramos en el bucle.
-  while (Serial.available()) {
-    //Comprobamos si viene primero el icono '$'
-    if ( Serial.read() == '$' ) {
-      //En caso de venir ese icono, comprobamos que el segundo sera también '$'. En caso de ser, es un JSON con información del sensor y vamos a proceder a leerlo.
-      while ( ! Serial.available() )  delay(1);
-
-      if ( Serial.read() == '$' ) {
-        //Leemos los datos.
-        readSerial();
-        lastMessage = rightNow;
-      }
-    }
-  }
-}
 /***********************************************************************
    UTILITY FUNCTIONS
 ***********************************************************************/
+
+//Hex to ASCII converter
+String HexString2ASCIIString(String hexstring) {
+  String temp = "", sub = "", result;
+  char buf[3];
+  for (int i = 0; i < hexstring.length(); i += 2) {
+    sub = hexstring.substring(i, i + 2);
+    sub.toCharArray(buf, 3);
+    char b = (char)strtol(buf, 0, 16);
+    if (b == '\0')
+      break;
+    temp += b;
+  }
+  return temp;
+}
+
+//Byte to hex converter
+inline String byte2HEX (byte data)
+{
+  return (String(data, HEX).length() == 1) ? String("0") + String(data, HEX) : String(data, HEX);
+}

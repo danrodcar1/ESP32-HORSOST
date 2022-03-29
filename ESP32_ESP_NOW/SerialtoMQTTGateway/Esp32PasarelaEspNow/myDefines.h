@@ -9,8 +9,7 @@
 #define HTTP_OTA_VERSION      String(__FILE__).substring(String(__FILE__).lastIndexOf('\\')+1) + ".esp32" 
 #define VERSION_MAJOR 1
 #define VERSION_MINOR 0
-
-#define LED_STATUS 16  
+ 
 #define SERIAL_BAUD_RATE 115200
 
 #define CHECK_UPDATE_TIMER 10L 

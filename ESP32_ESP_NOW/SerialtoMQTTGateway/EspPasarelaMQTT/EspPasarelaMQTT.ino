@@ -6,6 +6,7 @@
 */
 
 //Librerias.
+#include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <ESP8266httpUpdate.h>
@@ -155,6 +156,7 @@ void reconnect() {
 
 void callback(char* topic, byte* payload, unsigned int length)
 {
+  DynamicJsonDocument doc(1024);
   Serial.print("Command from MQTT broker is : [");
   Serial.print(topic);
   Serial.println("] ");
@@ -167,17 +169,19 @@ void callback(char* topic, byte* payload, unsigned int length)
     }
     message_buff[i] = '\0';
     String msgString = String(message_buff);
+    deserializeJson(doc, msgString);
+    JsonObject obj = doc.as<JsonObject>();
+    String macaddr = obj["MAC"] + '\0';
+    String topic = obj["topic"];
+    String message = obj["message"];
+    String packet = (topic + "|" + message);    // Select topic by ESP MAC
     Serial.write("$$");
-    Serial.println(length);
-    Serial.println(msgString);
+    Serial.write(HexString2ASCIIString(macaddr).c_str());
+    Serial.write(packet.length());
+    Serial.write(packet.c_str());
   }
 }
 
-
-
-/***********************************************************************
-   UTILITY FUNCTIONS
-***********************************************************************/
 
 void readSerialAndPublicMQTT(unsigned long rightNow) {
   serialReceived readSerial;
@@ -235,11 +239,6 @@ serialReceived readFromSerial() {
   return readSerial;
 }
 
-//Byte to hex converter
-inline String byte2HEX (byte data)
-{
-  return (String(data, HEX).length() == 1) ? String("0") + String(data, HEX) : String(data, HEX);
-}
 
 void checkForUpdates() {
   // wait for WiFi connection
@@ -282,6 +281,34 @@ void update_progress(int cur, int total) {
 void update_error(int err) {
   Serial.printf("CALLBACK:  HTTP update fatal error code %d\n", err);
 }
+
+/***********************************************************************
+   UTILITY FUNCTIONS
+***********************************************************************/
+
+//Hex to ASCII converter
+String HexString2ASCIIString(String hexstring) {
+  String temp = "", sub = "", result;
+  char buf[3];
+  for (int i = 0; i < hexstring.length(); i += 2) {
+    sub = hexstring.substring(i, i + 2);
+    sub.toCharArray(buf, 3);
+    char b = (char)strtol(buf, 0, 16);
+    if (b == '\0')
+      break;
+    temp += b;
+  }
+  return temp;
+}
+
+//Byte to hex converter
+inline String byte2HEX (byte data)
+{
+  return (String(data, HEX).length() == 1) ? String("0") + String(data, HEX) : String(data, HEX);
+}
+
+
+
 
 /***********************************************************************
    INTERRUPT FUNCTIONS
