@@ -63,10 +63,7 @@ void setup() {
   //  checkForUpdates();
   //  timerManager.setInterval(CHECK_UPDATE_TIMER * 60000L, checkForUpdates); // Look for update each 10'
 
-
-
   ESP.wdtEnable(WATCHDOG_TIMEOUT_S * 1000);
-
 
   //Inicializamos el LED y el ID de la placa.
   pinMode(LED_BUILTIN, OUTPUT);

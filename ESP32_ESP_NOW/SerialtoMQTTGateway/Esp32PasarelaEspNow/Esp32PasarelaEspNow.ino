@@ -25,7 +25,9 @@ WiFiClientSecure espClient;
 uint8_t PMK_KEY_STR[16] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 uint8_t LMK_KEY_STR[16] = {0x33, 0x44, 0x33, 0x44, 0x33, 0x44, 0x33, 0x44, 0x33, 0x44, 0x33, 0x44, 0x33, 0x44, 0x33, 0x44};
 
+//Default MAC: {0x08, 0x3A, 0xF2, 0xA8, 0x11, 0x74}
 uint8_t gatewayCustomMac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33}; //Custom mac address for
+String gatewayCustomMac_str = "363333333333"; //Custom mac address for
 
 // Add below MAC from peers to connect with
 uint8_t mac_peer1[] = {0x3E, 0x33, 0x33, 0x33, 0x33, 0x34};
@@ -59,19 +61,14 @@ void watchDogRefresh();
 void setup()
 {
   Serial.begin(115200);
+  //Check for updates. Then, its disconnected from service and set AP mode and assing a custom MAC
   connectToNetworkAndUpdate();
-  //Ponemos el WiFi en modo AP.
-  WiFi.mode(WIFI_AP);
-  //Establecemos la MAC para esta ESP
-  esp_wifi_set_mac(ESP_IF_WIFI_AP, gatewayCustomMac); // esp32 code
-  Serial.print("MAC: "); Serial.println(WiFi.softAPmacAddress());
+
   //init watchdog
   watchDogTimer = timerBegin(0, 80, true); //timer 0, div80
   timerAttachInterrupt(watchDogTimer, &watchDogInterrupt, true);
   timerAlarmWrite(watchDogTimer, WATCHDOG_TIMEOUT_S * 1000000, false);
   timerAlarmEnable(watchDogTimer);
-
-  //  timerManager.setInterval(CHECK_UPDATE_TIMER * 60000L, connectToNetworkAndUpdate); // Look for update each 10'
 
   if (esp_now_init() != ESP_OK)
   {
@@ -116,7 +113,9 @@ void readSerialtoEspnow(unsigned long rightNow) {
         //Extrac MAC, topic and data from Serial : MAC/{data}
         readSerial = readFromSerial();
         //Enviamos por ESP_NOW
-        esp_now_send((uint8_t*)HexString2ASCIIString(readSerial.macaddr).c_str(), (uint8_t*)readSerial.packet.c_str(), 250);
+        esp_now_send((uint8_t*)HexString2ASCIIString(readSerial.macaddr).c_str(), (uint8_t*)readSerial.packet.c_str(), readSerial.len);
+        //Reset this device if is necessary
+        if (readSerial.macaddr.equals(gatewayCustomMac_str) && readSerial.topic.equals("update") && readSerial.message.equals("yes"))ESP.restart();
         lastMessage = rightNow;
       }
     }
@@ -237,6 +236,11 @@ void connectToNetworkAndUpdate() {
   espClient.setTimeout(12);
   checkForUpdates();
   WiFi.disconnect();
+  //Ponemos el WiFi en modo AP.
+  WiFi.mode(WIFI_AP);
+  //Establecemos la MAC para esta ESP
+  esp_wifi_set_mac(ESP_IF_WIFI_AP, gatewayCustomMac); // esp32 code
+  Serial.print("MAC: "); Serial.println(WiFi.softAPmacAddress());
 }
 
 
