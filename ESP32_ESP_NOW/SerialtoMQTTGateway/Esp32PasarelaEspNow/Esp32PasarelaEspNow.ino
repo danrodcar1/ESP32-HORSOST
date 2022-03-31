@@ -31,7 +31,8 @@ String gatewayCustomMac_str = "363333333333"; //Custom mac address for
 
 // Add below MAC from peers to connect with
 uint8_t mac_peer1[] = {0x3E, 0x33, 0x33, 0x33, 0x33, 0x34};
-uint8_t mac_peer2[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+uint8_t mac_peer2[] = {0xDC, 0x4F, 0x22, 0x76, 0x23, 0x47};
+
 esp_now_peer_info_t peer1;
 esp_now_peer_info_t peer2;
 
@@ -112,7 +113,7 @@ void readSerialtoEspnow(unsigned long rightNow) {
         //Leemos los datos.
         //Extrac MAC, topic and data from Serial : MAC/{data}
         readSerial = readFromSerial();
-        //Enviamos por ESP_NOW
+        //Enviamos por ESP_NOW  
         esp_now_send((uint8_t*)HexString2ASCIIString(readSerial.macaddr).c_str(), (uint8_t*)readSerial.packet.c_str(), readSerial.len);
         //Reset this device if is necessary
         if (readSerial.macaddr.equals(gatewayCustomMac_str) && readSerial.topic.equals("update") && readSerial.message.equals("yes"))ESP.restart();
@@ -197,6 +198,7 @@ void addingMoreFriends() {
   memcpy(peer2.peer_addr, mac_peer2, 6);
   peer2.channel = WIFI_CHANNEL;
   peer2.encrypt = 0;
+  peer2.ifidx = ESP_IF_WIFI_AP; 
   // Register the peer
   Serial.println("Registering a peer 2");
   if ( esp_now_add_peer(&peer2) != ESP_OK) {
