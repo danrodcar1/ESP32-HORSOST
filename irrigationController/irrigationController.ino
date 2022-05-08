@@ -12,7 +12,7 @@
 /**********************************************************************
    VARS
 ***********************************************************************/
-BearSSL::WiFiClientSecure espClient;
+WiFiClientSecure espClient;
 PubSubClient client(espClient);
 SimpleTimer timerManager; //timer declaration
 
@@ -25,17 +25,13 @@ const int systemLedOutput[] = {12, 14};
 int length = sizeof(systemRelayOutput) / sizeof(systemRelayOutput[0]);
 
 int ledState = LOW;
-int brightness = 0;    // how bright the LED is
-int fadeAmount = 5;    // how many points to fade the LED by
-unsigned long previousMillisBlink = 0;        // will store last time LED was updated
-unsigned long previousMillisFade = 0;        // will store last time LED was updated
-unsigned long previousMillisSend = 0;        // will store last time LED was updated
+int blinkLedTimer = 0;
 
 struct __attribute__((packed)) MQTT_MSG {
-  String ctrlMode;
+  bool ctrlMode;
   int numRelay;
   int cmdRelay;
-  String id;
+  const char* id;
 } messageReceived;
 
 void irrigationControllerManual(struct MQTT_MSG msgRcv);
@@ -53,6 +49,9 @@ void setup() {
 
   checkForUpdates();
   timerManager.setInterval(CHECK_UPDATE_TIMER * 60000L, checkForUpdates); // Look for update each 10'
+
+  blinkLedTimer = timerManager.setInterval(500, blinkLed);
+  timerManager.disable(blinkLedTimer);
 
   ESP.wdtEnable(WATCHDOG_TIMEOUT_S * 1000);
 
@@ -80,15 +79,7 @@ void loop() {
   //Esta llamada para que la librería recupere el controlz
   client.loop();
 
-  /*
-     Advice system led control:
-     If the system is in manual MODE and it's working, advice led has two OP mode:
-     1) Blink with 500ms if there're only one relay opened
-     2) permanently HIGH if both relay are ON.
-  */
-  if (messageReceived.ctrlMode.equals("false") && messageReceived.cmdRelay == 1) blinkLed(systemLedOutput[1], rightNow, 500);
-  if (messageReceived.ctrlMode.equals("true")) irrigationControllerAuto(rightNow);
-
+  timerManager.run();
   ESP.wdtFeed();
 }
 
@@ -113,7 +104,6 @@ void connectToNetwork() {
   Serial.println("WiFi conectado");
   Serial.println("Direccion IP: ");
   Serial.println(WiFi.localIP());
-//  espClient.setFingerprint(OTA_FINGERPRINT);
   espClient.setInsecure();
   espClient.setTimeout(12);
 }
@@ -163,7 +153,7 @@ void reconnect() {
 
 void callback(char* topic, byte* payload, unsigned int length)
 {
-  DynamicJsonDocument doc(1024);
+  StaticJsonDocument<256> doc;
   Serial.print("Command from MQTT broker is : [");
   Serial.print(topic);
   Serial.println("] ");
@@ -175,23 +165,25 @@ void callback(char* topic, byte* payload, unsigned int length)
       message_buff[i] = payload[i];
     }
     message_buff[i] = '\0';
-    String msgString = String(message_buff);
-    deserializeJson(doc, msgString);
-    JsonObject obj = doc.as<JsonObject>();
-    String rele = obj["rele"];
-    messageReceived.numRelay = rele.toInt();
-    String command = obj["comando"];
-    messageReceived.cmdRelay = command.toInt();
-    String messageId = obj["id"];
-    messageReceived.id = messageId;
-    String ctrlMode = obj["auto"];
-    messageReceived.ctrlMode = ctrlMode;
-    if (messageReceived.ctrlMode.equals("false")) irrigationControllerManual(messageReceived);
+    DeserializationError error = deserializeJson(doc, message_buff);
+    if (error) {
+      Serial.print(F("deserializeJson() failed: "));
+      Serial.println(error.f_str());
+      return;
+    }
+    messageReceived.ctrlMode =  doc["auto"];
+    messageReceived.id = doc["id"];
+    messageReceived.numRelay = doc["rele"];
+    messageReceived.cmdRelay  = doc["comando"];
+    irrigationController(messageReceived);
+    client.publish(topic_string_status.c_str(), message_buff);
   }
 }
 
-void irrigationControllerManual(struct MQTT_MSG msgRcv) {
-  digitalWrite(systemLedOutput[0], LOW);//Manual mode: static led1 OFF
+void irrigationController(struct MQTT_MSG msgRcv) {
+  if (msgRcv.ctrlMode == true) digitalWrite(systemLedOutput[0], HIGH); //Auto mode: static led1 ON
+  else digitalWrite(systemLedOutput[0], LOW);//Manual mode: static led1 OFF
+
   switch (msgRcv.cmdRelay) {
     case 0:
       digitalWrite(systemLedOutput[1], LOW);//Manual mode: static led2 OFF
@@ -203,6 +195,7 @@ void irrigationControllerManual(struct MQTT_MSG msgRcv) {
       }
       break;
     case 1:
+      timerManager.enable(blinkLedTimer);
       for (int i = 0; i < length; i++) {
         if (msgRcv.numRelay % 2 == 1) {
           digitalWrite(systemRelayOutput[i], LOW);//Turn on Relay
@@ -215,44 +208,6 @@ void irrigationControllerManual(struct MQTT_MSG msgRcv) {
       break;
     default:
       break;
-  }
-  char message[512];
-  sprintf(message, "{\"modo\":%i,\"rele\":\"%i\",\"comando\":%i,\"id\":%s}", msgRcv.ctrlMode, msgRcv.numRelay , msgRcv.cmdRelay , msgRcv.id.c_str());
-  client.publish(topic_string_status.c_str(), message);
-}
-
-void irrigationControllerAuto(unsigned long rightNow) {
-  fadingLed(systemLedOutput[0], rightNow, 30); //Auto mode: Fading led1
-  switch (messageReceived.cmdRelay) {
-    case 0:
-      digitalWrite(systemLedOutput[1], LOW);//Manual mode: static led2 OFF
-      for (int i = 0; i < length; i++) {
-        if (messageReceived.numRelay % 2 == 1) {
-          digitalWrite(systemRelayOutput[i], HIGH);//Turn off Relay
-        }
-        messageReceived.numRelay = messageReceived.numRelay / 2;
-      }
-      break;
-    case 1:
-      for (int i = 0; i < length; i++) {
-        if (messageReceived.numRelay % 2 == 1) {
-          digitalWrite(systemRelayOutput[i], LOW);//Turn on Relay
-        }
-        else {
-          digitalWrite(systemRelayOutput[i], HIGH);//Turn off Relay
-        }
-        messageReceived.numRelay = messageReceived.numRelay / 2;
-      }
-      blinkLed(systemLedOutput[1], rightNow, 500);
-      break;
-    default:
-      break;
-  }
-  if (rightNow - previousMillisSend >= SEND_MSG_MINUTES * 60000L) {
-    char message[512];
-    sprintf(message, "{\"modo\":%i,\"rele\":\"%i\",\"comando\":%i,\"id\":%s}", messageReceived.ctrlMode, messageReceived.numRelay , messageReceived.cmdRelay , messageReceived.id.c_str());
-    client.publish(topic_string_status.c_str(), message);
-    previousMillisSend = rightNow;
   }
 }
 
@@ -282,36 +237,16 @@ void checkForUpdates() {
   }
 }
 
-void blinkLed(int ledPin, unsigned long currentMillis, long interval) {
-  if (currentMillis - previousMillisBlink >= interval) {
-    // save the last time you blinked the LED
-    previousMillisBlink = currentMillis;
-    // if the LED is off turn it on and vice-versa:
-    if (ledState == LOW) {
-      ledState = HIGH;
-    } else {
-      ledState = LOW;
-    }
-    // set the LED with the ledState of the variable:
-    digitalWrite(ledPin, ledState);
+void blinkLed() {
+  if (ledState == LOW) {
+    ledState = HIGH;
+  } else {
+    ledState = LOW;
   }
+  // set the LED with the ledState of the variable:
+  digitalWrite(systemLedOutput[1], ledState);
 }
 
-void fadingLed(int ledPin, unsigned long currentMillis, long interval) {
-  if (currentMillis - previousMillisFade >= interval) {
-    // set the brightness of pin 9:
-    analogWrite(ledPin, brightness);
-
-    // change the brightness for next time through the loop:
-    brightness = brightness + fadeAmount;
-
-    // reverse the direction of the fading at the ends of the fade:
-    if (brightness <= 0 || brightness >= 255) {
-      fadeAmount = -fadeAmount;
-    }
-    previousMillisFade = currentMillis;
-  }
-}
 /***********************************************************************
    UTILITY FUNCTIONS
 ***********************************************************************/
