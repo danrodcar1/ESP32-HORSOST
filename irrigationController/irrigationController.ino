@@ -27,7 +27,9 @@ int length = sizeof(systemRelayOutput) / sizeof(systemRelayOutput[0]);
 int ledState = LOW;
 int brightness = 0;    // how bright the LED is
 int fadeAmount = 5;    // how many points to fade the LED by
-unsigned long previousMillis = 0;        // will store last time LED was updated
+unsigned long previousMillisBlink = 0;        // will store last time LED was updated
+unsigned long previousMillisFade = 0;        // will store last time LED was updated
+unsigned long previousMillisSend = 0;        // will store last time LED was updated
 
 struct __attribute__((packed)) MQTT_MSG {
   String ctrlMode;
@@ -37,7 +39,6 @@ struct __attribute__((packed)) MQTT_MSG {
 } messageReceived;
 
 void irrigationControllerManual(struct MQTT_MSG msgRcv);
-void irrigationControllerAuto(struct MQTT_MSG msgRcv);
 /**********************************************************************
   ARDUINO SETUP & MAIN LOOP
 ***********************************************************************/
@@ -85,7 +86,7 @@ void loop() {
      1) Blink with 500ms if there're only one relay opened
      2) permanently HIGH if both relay are ON.
   */
-  if (messageReceived.ctrlMode.equals("false") && messageReceived.cmdRelay == 1 && messageReceived.numRelay < 4) blinkLed(systemLedOutput[1], rightNow, 500);
+  if (messageReceived.ctrlMode.equals("false") && messageReceived.cmdRelay == 1) blinkLed(systemLedOutput[1], rightNow, 500);
   if (messageReceived.ctrlMode.equals("true")) irrigationControllerAuto(rightNow);
 
   ESP.wdtFeed();
@@ -112,7 +113,7 @@ void connectToNetwork() {
   Serial.println("WiFi conectado");
   Serial.println("Direccion IP: ");
   Serial.println(WiFi.localIP());
-  espClient.setFingerprint(OTA_FINGERPRINT);
+//  espClient.setFingerprint(OTA_FINGERPRINT);
   espClient.setInsecure();
   espClient.setTimeout(12);
 }
@@ -242,14 +243,17 @@ void irrigationControllerAuto(unsigned long rightNow) {
         }
         messageReceived.numRelay = messageReceived.numRelay / 2;
       }
-      if (messageReceived.numRelay < 4) blinkLed(systemLedOutput[1], rightNow, 500);
+      blinkLed(systemLedOutput[1], rightNow, 500);
       break;
     default:
       break;
   }
-  char message[512];
-  sprintf(message, "{\"modo\":%i,\"rele\":\"%i\",\"comando\":%i,\"id\":%s}", messageReceived.ctrlMode, messageReceived.numRelay , messageReceived.cmdRelay , messageReceived.id.c_str());
-  client.publish(topic_string_status.c_str(), message);
+  if (rightNow - previousMillisSend >= SEND_MSG_MINUTES * 60000L) {
+    char message[512];
+    sprintf(message, "{\"modo\":%i,\"rele\":\"%i\",\"comando\":%i,\"id\":%s}", messageReceived.ctrlMode, messageReceived.numRelay , messageReceived.cmdRelay , messageReceived.id.c_str());
+    client.publish(topic_string_status.c_str(), message);
+    previousMillisSend = rightNow;
+  }
 }
 
 void checkForUpdates() {
@@ -261,7 +265,7 @@ void checkForUpdates() {
     ESPhttpUpdate.onEnd(update_finished);
     ESPhttpUpdate.onProgress(update_progress);
     ESPhttpUpdate.onError(update_error);
-    t_httpUpdate_return ret = ESPhttpUpdate.update(espClient, OTA_URL);
+    t_httpUpdate_return ret = ESPhttpUpdate.update(espClient, OTA_URL, HTTP_OTA_VERSION);
     switch (ret) {
       case HTTP_UPDATE_FAILED:
         Serial.printf("HTTP_UPDATE_FAILD Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
@@ -279,9 +283,9 @@ void checkForUpdates() {
 }
 
 void blinkLed(int ledPin, unsigned long currentMillis, long interval) {
-  if (currentMillis - previousMillis >= interval) {
+  if (currentMillis - previousMillisBlink >= interval) {
     // save the last time you blinked the LED
-    previousMillis = currentMillis;
+    previousMillisBlink = currentMillis;
     // if the LED is off turn it on and vice-versa:
     if (ledState == LOW) {
       ledState = HIGH;
@@ -294,7 +298,7 @@ void blinkLed(int ledPin, unsigned long currentMillis, long interval) {
 }
 
 void fadingLed(int ledPin, unsigned long currentMillis, long interval) {
-  if (currentMillis - previousMillis >= interval) {
+  if (currentMillis - previousMillisFade >= interval) {
     // set the brightness of pin 9:
     analogWrite(ledPin, brightness);
 
@@ -305,7 +309,7 @@ void fadingLed(int ledPin, unsigned long currentMillis, long interval) {
     if (brightness <= 0 || brightness >= 255) {
       fadeAmount = -fadeAmount;
     }
-    previousMillis = currentMillis;
+    previousMillisFade = currentMillis;
   }
 }
 /***********************************************************************
