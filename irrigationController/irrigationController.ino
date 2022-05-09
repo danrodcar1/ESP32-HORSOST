@@ -22,7 +22,7 @@ String topic_string_status = ("orchard/" + TYPE_NODE + "/");
 
 const int systemRelayOutput[] = {4, 5};//4:=relay1;5:=relay2;12:=led1;14:=led2
 const int systemLedOutput[] = {12, 14};
-int length = sizeof(systemRelayOutput) / sizeof(systemRelayOutput[0]);
+int lengthOutput = sizeof(systemRelayOutput) / sizeof(systemRelayOutput[0]);
 
 int ledState = LOW;
 int blinkLedTimer = 0;
@@ -60,7 +60,7 @@ void setup() {
   digitalWrite(LED_BUILTIN, LOW);
 
   //Initialize Rele pinout & LED. Turn off relay
-  for (int i = 0; i < length; i++)
+  for (int i = 0; i < lengthOutput; i++)
   {
     pinMode(systemRelayOutput[i], OUTPUT);
     pinMode(systemLedOutput[i], OUTPUT);
@@ -183,11 +183,11 @@ void callback(char* topic, byte* payload, unsigned int length)
 void irrigationController(struct MQTT_MSG msgRcv) {
   if (msgRcv.ctrlMode == true) digitalWrite(systemLedOutput[0], HIGH); //Auto mode: static led1 ON
   else digitalWrite(systemLedOutput[0], LOW);//Manual mode: static led1 OFF
-
   switch (msgRcv.cmdRelay) {
     case 0:
-      digitalWrite(systemLedOutput[1], LOW);//Manual mode: static led2 OFF
-      for (int i = 0; i < length; i++) {
+      timerManager.disable(blinkLedTimer);
+      digitalWrite(systemLedOutput[1], LOW);
+      for (int i = 0; i < lengthOutput; i++) {
         if (msgRcv.numRelay % 2 == 1) {
           digitalWrite(systemRelayOutput[i], HIGH);//Turn off Relay
         }
@@ -196,7 +196,7 @@ void irrigationController(struct MQTT_MSG msgRcv) {
       break;
     case 1:
       timerManager.enable(blinkLedTimer);
-      for (int i = 0; i < length; i++) {
+      for (int i = 0; i < lengthOutput; i++) {
         if (msgRcv.numRelay % 2 == 1) {
           digitalWrite(systemRelayOutput[i], LOW);//Turn on Relay
         }
