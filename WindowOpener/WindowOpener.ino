@@ -81,7 +81,7 @@ enum moveDirection {
 
 // System calibration.- rack-pinion mechanism
 const int zPinion = 16; // number of pinion teeth (teeth)
-const int nRack = 3; // number of rack teeth per centimeter (teeth/cm)
+const float nRack = 3.19; // number of rack teeth per centimeter (teeth/cm)
 const int tsPinion = 45; //pinion turning speed (rpm)
 int timeOpen = 0;
 
@@ -129,7 +129,7 @@ void setup()
   timerAlarmEnable(watchDogTimer);
 
   // Setting default options for the green-house window
-  motorInitialize();
+//  motorInitialize();
 }
 
 void loop()
@@ -155,11 +155,11 @@ void systemCalib(const int pinMotor[3], int swStatus, uint8_t channel) {
   float traveledSpace;
   closeWindow(pinMotor, swStatus, channel);
   enableMotors();
-  Serial.println("System calibration");
-  Serial.print("Traveled Space (cm)");
-  Serial.print("/t");
-  Serial.println("Time (ms)");
   while (Serial.available()) {
+    Serial.println("System calibration");
+    Serial.print("Traveled Space (cm)");
+    Serial.print("/t");
+    Serial.println("Time (ms)");
     for (timeMove = 0; timeMove < 20000; timeMove++) {
       char stopPrint = Serial.read();
       moveMotorForward(pinMotor, channel, fullSpeed);
@@ -292,14 +292,14 @@ void callback(char* topic, byte* payload, unsigned int length)
   char message_buff[100];
 }
 
-float readTemp() {
-  // Read LM35_Sensor1 ADC Pin
-  LM35_Raw_Sensor = analogRead(LM35_PIN);
-  LM35_Filtered_Sensor = readADC_Avg(LM35_Raw_Sensor);
-  // Calibrate ADC & Get Voltage (in mV)
-  Voltage = readADC_Cal(LM35_Filtered_Sensor);
-  // TempC = Voltage(mV) / 10
-  return (Voltage / 10);
+void ctrlTempFan() {
+  float currentTemperature = readTemp();
+  if ((currentTemperature > targetTemp) && (abs(currentTemperature - targetTemp) >= errorTemp)) {
+    ledcWrite(LEDC_CHANNEL_2, 255);   // Turn-on fan
+  }
+  if ((currentTemperature <= targetTemp) && (abs(currentTemperature - targetTemp) >= errorTemp)) {
+    ledcWrite(LEDC_CHANNEL_2, 25);   // Turn-off fan
+  }
 }
 
 /***********************************************************************
@@ -339,6 +339,17 @@ void watchDogRefresh()
 /***********************************************************************
    UTILITY FUNCTIONS
 ***********************************************************************/
+
+float readTemp() {
+  // Read LM35_Sensor ADC Pin & filter the raw signal
+  LM35_Raw_Sensor = analogRead(LM35_PIN);
+  LM35_Filtered_Sensor = readADC_Avg(LM35_Raw_Sensor);
+  // Calibrate ADC & Get Voltage (in mV)
+  Voltage = readADC_Cal(LM35_Filtered_Sensor);
+  // TempC = Voltage(mV) / 10
+  return (Voltage / 10);
+}
+
 uint32_t readADC_Cal(int ADC_Raw)
 {
   esp_adc_cal_characteristics_t adc_chars;
@@ -362,16 +373,6 @@ uint32_t readADC_Avg(int ADC_Raw)
     Sum += AN_Pot1_Buffer[i];
   }
   return (Sum / FILTER_LEN);
-}
-
-void ctrlTempFan() {
-  float currentTemperature = readTemp();
-  if ((currentTemperature > targetTemp) && (abs(currentTemperature - targetTemp) >= errorTemp)) {
-    ledcWrite(LEDC_CHANNEL_2, 255);   // Turn-on fan
-  }
-  if ((currentTemperature <= targetTemp) && (abs(currentTemperature - targetTemp) >= errorTemp)) {
-    ledcWrite(LEDC_CHANNEL_2, 25);   // Turn-off fan
-  }
 }
 
 void checkForUpdates() {
