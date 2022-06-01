@@ -16,7 +16,9 @@
 ***********************************************************************/
 
 // ESP32  WiFi & UPDATE SERVER
-WiFiClientSecure espClient;
+//WiFiClientSecure espClient;
+WiFiClient espClient;
+
 PubSubClient client(espClient);
 
 const unsigned char FWVER[] =
@@ -70,7 +72,7 @@ const int LEDC_TIMER_10_BIT = 10;
 const int LEDC_CHANNEL_0 = 0;
 const int LEDC_CHANNEL_1 = 1;
 
-const int pinMotorA[3] = { pinPWMA, pinAIN2, pinAIN1 };
+const int pinMotorA[3] = { pinPWMA, pinAIN1, pinAIN2 };
 const int pinMotorB[3] = { pinPWMB, pinBIN1, pinBIN2 };
 int lengthMotor = sizeof(pinMotorB) / sizeof(pinMotorB[0]);
 
@@ -83,7 +85,9 @@ enum moveDirection {
 const int zPinion = 16; // number of pinion teeth (teeth)
 const float nRack = 3.19; // number of rack teeth per centimeter (teeth/cm)
 const int tsPinion = 45; //pinion turning speed (rpm)
-int timeOpen = 0;
+int maxTimeOpen = 0;
+int fullSpeed = 1024;  // full duty long range movement (0-1024)..
+int softSpeed = 512;  // mid duty for aprox movement (0-1024)..
 
 // LM35
 const int LM35_PIN = 36;
@@ -100,8 +104,7 @@ int AN_Pot1_i = 0;
 
 // Other stuff
 unsigned long CHECK_TEMP_PERIOD = 500;
-int fullSpeed = 255;  // full duty long range movement (0-255)..
-int softSpeed = 128;  // mid duty for aprox movement (0-255)..
+
 
 void IRAM_ATTR watchDogInterrupt();
 void watchDogRefresh();
@@ -128,8 +131,13 @@ void setup()
   timerAlarmWrite(watchDogTimer, WATCHDOG_TIMEOUT_S * 1000000, false);
   timerAlarmEnable(watchDogTimer);
 
+  if (SET_WINDOW_CALIBRATION) {
+    windowCalib(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, fullSpeed);
+    windowCalib(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, fullSpeed);
+  }
+
   // Setting default options for the green-house window
-//  motorInitialize();
+  //  motorInitialize();
 }
 
 void loop()
@@ -148,36 +156,57 @@ void loop()
   OPERATIONAL FUNCTIONS
 ***********************************************************************/
 
-void systemCalib(const int pinMotor[3], int swStatus, uint8_t channel) {
+void windowCalib(const int pinMotor[3], int swStatus, uint8_t channel, int movSpeed) {
   float revDist = (float)zPinion / nRack; // For each complete revolution of the pinion, the rack will move forward as many teeth as the pinion has (cm)
   float velMove = (float)tsPinion * revDist / 60000L; // forward/reverse speed (cm/ms)
   int timeMove;
   float traveledSpace;
-  closeWindow(pinMotor, swStatus, channel);
+  char dataBuffer[40];
+  closeWindow(pinMotor, swStatus, channel, softSpeed);
   enableMotors();
-  while (Serial.available()) {
-    Serial.println("System calibration");
-    Serial.print("Traveled Space (cm)");
-    Serial.print("/t");
-    Serial.println("Time (ms)");
-    for (timeMove = 0; timeMove < 20000; timeMove++) {
-      char stopPrint = Serial.read();
-      moveMotorForward(pinMotor, channel, fullSpeed);
-      traveledSpace = (float)velMove * timeMove;
-      Serial.print(traveledSpace);
-      Serial.print(",");
-      Serial.print(timeMove);
-      Serial.println();
-      delay (1);
-      if (stopPrint == 's')break;
-    }
-    timeOpen = timeMove;
-    Serial.print("Opening time: ");
-    Serial.println(timeOpen + "ms");
-    disableMotors();
-    stopMotor(pinMotor, channel);
-    break;
+  Serial.println("====== Window calibration ======");
+  Serial.print((String)"Traveled Space (cm)" + '\t' + "Time (ms)" + '\n');
+  for (timeMove = 0; timeMove < 20000; timeMove++) {
+    moveMotorForward(pinMotor, channel, movSpeed);
+    traveledSpace = (float)velMove * timeMove;//* movSpeed / fullSpeed;
+    sprintf(dataBuffer, "%.3f\t%d\n", traveledSpace, timeMove);
+    Serial.print(dataBuffer);
+    delay (1);
+    ctrlTempFan();
+    watchDogRefresh();
+    if (traveledSpace >= 25)movSpeed = softSpeed;
+    if (traveledSpace >= 30)break;
   }
+  maxTimeOpen = timeMove;
+  Serial.println((String)"Opening time: " + maxTimeOpen + " ms");
+  closeWindow(pinMotor, swStatus, channel, softSpeed);
+  disableMotors();
+  stopMotor(pinMotor, channel);
+}
+
+void windowOpenCtrl(const int pinMotor[3], int swStatus, uint8_t channel, float movDist, int movSpeed) {
+  float revDist = (float)zPinion / nRack; // For each complete revolution of the pinion, the rack will move forward as many teeth as the pinion has (cm)
+  float velMove = (float)tsPinion * revDist / 60000L; // forward/reverse speed (cm/ms)
+  int timeMove;
+  float traveledSpace;
+  closeWindow(pinMotor, swStatus, channel, softSpeed);
+  enableMotors();
+  if (movDist == 0) {
+    closeWindow(pinMotor, swStatus, channel, softSpeed);
+  }
+  else {
+    for (timeMove = 0; timeMove < 20000; timeMove++) {
+      moveMotorForward(pinMotor, channel, movSpeed);
+      traveledSpace = (float)velMove * timeMove;//* movSpeed / fullSpeed;
+      delay (1);
+      ctrlTempFan();
+      watchDogRefresh();
+      if (traveledSpace >= movDist * 0.85)movSpeed = softSpeed;
+      if (traveledSpace >= movDist)break;
+    }
+  }
+  disableMotors();
+  stopMotor(pinMotor, channel);
 }
 
 void startingIO() {
@@ -212,8 +241,8 @@ void startingIO() {
 }
 
 void motorInitialize() {
-  closeWindow(pinMotorA, digitalRead(END_SW_PIN[0]), LEDC_CHANNEL_0);
-  closeWindow(pinMotorB, digitalRead(END_SW_PIN[1]), LEDC_CHANNEL_1);
+  closeWindow(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, softSpeed);
+  closeWindow(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, softSpeed);
   fullStop();
 }
 
@@ -242,8 +271,8 @@ void connectToNetwork() {
   Serial.println("WiFi conectado");
   Serial.println("Direccion IP: ");
   Serial.println(WiFi.localIP());
-  espClient.setInsecure();
-  espClient.setTimeout(12);
+  //  espClient.setInsecure();
+  //  espClient.setTimeout(12);
 }
 
 void reconnect() {
@@ -295,10 +324,10 @@ void callback(char* topic, byte* payload, unsigned int length)
 void ctrlTempFan() {
   float currentTemperature = readTemp();
   if ((currentTemperature > targetTemp) && (abs(currentTemperature - targetTemp) >= errorTemp)) {
-    ledcWrite(LEDC_CHANNEL_2, 255);   // Turn-on fan
+    ledcWrite(LEDC_CHANNEL_2, 4096);   // Turn-on fan
   }
   if ((currentTemperature <= targetTemp) && (abs(currentTemperature - targetTemp) >= errorTemp)) {
-    ledcWrite(LEDC_CHANNEL_2, 25);   // Turn-off fan
+    ledcWrite(LEDC_CHANNEL_2, 1024);   // Turn-off fan
   }
 }
 
@@ -307,19 +336,26 @@ void ctrlTempFan() {
 ***********************************************************************/
 
 void buttonFunction(Button2& btn) {
+  float movDist = 0;
   switch (btn.getType()) {
     case single_click:
+      movDist = 7.5;
+      Serial.print("Opening windows to 25%");
       break;
     case double_click:
-      Serial.print("double ");
+      movDist = 15;
+      Serial.print("Opening windows to 50%");
       break;
     case triple_click:
-      Serial.print("triple ");
+      movDist = 22.5;
+      Serial.print("opening windows to 75%");
       break;
     case long_click:
-      Serial.print("long");
+      movDist = 0;
+      Serial.print("==== Closing window ====");
       break;
   }
+  windowOpenCtrl(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, movDist, fullSpeed);
   Serial.print("click");
   Serial.print(" (");
   Serial.print(btn.getNumberOfClicks());
@@ -353,7 +389,6 @@ float readTemp() {
 uint32_t readADC_Cal(int ADC_Raw)
 {
   esp_adc_cal_characteristics_t adc_chars;
-
   esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars);
   return (esp_adc_cal_raw_to_voltage(ADC_Raw, &adc_chars));
 }
@@ -362,16 +397,9 @@ uint32_t readADC_Avg(int ADC_Raw)
 {
   int i = 0;
   uint32_t Sum = 0;
-
   AN_Pot1_Buffer[AN_Pot1_i++] = ADC_Raw;
-  if (AN_Pot1_i == FILTER_LEN)
-  {
-    AN_Pot1_i = 0;
-  }
-  for (i = 0; i < FILTER_LEN; i++)
-  {
-    Sum += AN_Pot1_Buffer[i];
-  }
+  if (AN_Pot1_i == FILTER_LEN)AN_Pot1_i = 0;
+  for (i = 0; i < FILTER_LEN; i++)Sum += AN_Pot1_Buffer[i];
   return (Sum / FILTER_LEN);
 }
 
@@ -390,21 +418,26 @@ void checkForUpdates() {
   }
 }
 
-int closeWindow(const int pinMotor[3], int swStatus, uint8_t channel) {
+int closeWindow(const int pinMotor[3], int swStatus, uint8_t channel, int movSpeed) {
   int swFlag;
-  if (swStatus == 1) {
+  if (digitalRead(swStatus) == 1) {
+    Serial.println("Window opened... Closing");
     enableMotors();
-    moveMotorBackward(pinMotor, channel, fullSpeed);
     for (int t = 0; t < 20000; t++) {
-      if (swStatus == 0) break;
+      moveMotorBackward(pinMotor, channel, movSpeed);
       delay (1);
+      ctrlTempFan();
+      watchDogRefresh();
+      if (digitalRead(swStatus) == 0) break;
     }
     stopMotor(pinMotor, channel);
-    swFlag = 1; //Window was closing (it was open before)
+    swFlag = 0; //Window was closing (it was open before)
   }
-  else if (swStatus == 0) {
+  else if (digitalRead(swStatus) == 0) {
+    Serial.println("Window already closed");
     swFlag = 0; //Window was already closed
   }
+  Serial.println("Window closed");
   return swFlag;
 }
 
