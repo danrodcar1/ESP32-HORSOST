@@ -82,12 +82,23 @@ enum moveDirection {
 };
 
 // System calibration.- rack-pinion mechanism
+/*
+   Note: In order to avoid overheatin in the motor driver,
+   the duty cycle will be halved and the new rpm value will be averaged
+*/
 const int zPinion = 16; // number of pinion teeth (teeth)
 const float nRack = 3.19; // number of rack teeth per centimeter (teeth/cm)
-const int tsPinion = 45; //pinion turning speed (rpm)
-int maxTimeOpen = 0;
-int fullSpeed = 1024;  // full duty long range movement (0-1024)..
-int softSpeed = 512;  // mid duty for aprox movement (0-1024)..
+const float tsPinion = 22.5; //pinion turning speed (rpm) at full PWM => 45rpm
+
+int maxTimeOpenA = 0;
+int maxTimeOpenB = 0;
+float motionFactor = 0;
+int movCMD = 0; // 0 = STOP; 1 = FORWARD; 2 = BACKWARD
+int timeTravelTarget = 0;
+unsigned long timeTravelStop = 0;
+int openPerc_ant = 0;
+int fullSpeed = 512;  // full duty long range movement (0-1024)..
+int softSpeed = 256;  // mid duty for aprox movement (0-1024)..
 
 // LM35
 const int LM35_PIN = 36;
@@ -105,7 +116,7 @@ int AN_Pot1_i = 0;
 // Other stuff
 unsigned long CHECK_TEMP_PERIOD = 500;
 
-
+void IRAM_ATTR onTimer();
 void IRAM_ATTR watchDogInterrupt();
 void watchDogRefresh();
 /**********************************************************************
@@ -132,22 +143,25 @@ void setup()
   timerAlarmEnable(watchDogTimer);
 
   if (SET_WINDOW_CALIBRATION) {
-    windowCalib(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, fullSpeed);
-    windowCalib(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, fullSpeed);
+    maxTimeOpenA = windowCalib(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, fullSpeed);
+    maxTimeOpenB = windowCalib(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, fullSpeed);
+    motionFactor = ((maxTimeOpenA + maxTimeOpenB) / 2) / 100;
   }
 
   // Setting default options for the green-house window
-  //  motorInitialize();
+  motorInitialize();
 }
 
 void loop()
 {
-  unsigned long currentMillis = millis();
   if (!client.connected()) {
     reconnect();
   }
   client.loop();
   button.loop();
+  ctrlTempFan();
+  windowCtrl(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, fullSpeed);
+  //  windowCtrl(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, fullSpeed);
   timerManager.run();
   watchDogRefresh();
 }
@@ -156,14 +170,15 @@ void loop()
   OPERATIONAL FUNCTIONS
 ***********************************************************************/
 
-void windowCalib(const int pinMotor[3], int swStatus, uint8_t channel, int movSpeed) {
+int windowCalib(const int pinMotor[3], int swStatus, uint8_t channel, int movSpeed) {
   float revDist = (float)zPinion / nRack; // For each complete revolution of the pinion, the rack will move forward as many teeth as the pinion has (cm)
   float velMove = (float)tsPinion * revDist / 60000L; // forward/reverse speed (cm/ms)
-  int timeMove;
-  float traveledSpace;
+  int timeMove = 0;
+  int maxTimeOpen = 0;
+  float traveledSpace = 0;
   char dataBuffer[40];
-  closeWindow(pinMotor, swStatus, channel, softSpeed);
   enableMotors();
+  closeWindow(pinMotor, swStatus, channel, movSpeed);
   Serial.println("====== Window calibration ======");
   Serial.print((String)"Traveled Space (cm)" + '\t' + "Time (ms)" + '\n');
   for (timeMove = 0; timeMove < 20000; timeMove++) {
@@ -174,39 +189,37 @@ void windowCalib(const int pinMotor[3], int swStatus, uint8_t channel, int movSp
     delay (1);
     ctrlTempFan();
     watchDogRefresh();
-    if (traveledSpace >= 25)movSpeed = softSpeed;
-    if (traveledSpace >= 30)break;
+    if (traveledSpace >= 27)movSpeed = softSpeed;
+    if (traveledSpace >= 31)break;
   }
   maxTimeOpen = timeMove;
   Serial.println((String)"Opening time: " + maxTimeOpen + " ms");
-  closeWindow(pinMotor, swStatus, channel, softSpeed);
+  closeWindow(pinMotor, swStatus, channel, movSpeed + 256);
   disableMotors();
   stopMotor(pinMotor, channel);
+  return maxTimeOpen;
 }
 
-void windowOpenCtrl(const int pinMotor[3], int swStatus, uint8_t channel, float movDist, int movSpeed) {
-  float revDist = (float)zPinion / nRack; // For each complete revolution of the pinion, the rack will move forward as many teeth as the pinion has (cm)
-  float velMove = (float)tsPinion * revDist / 60000L; // forward/reverse speed (cm/ms)
-  int timeMove;
-  float traveledSpace;
-  closeWindow(pinMotor, swStatus, channel, softSpeed);
-  enableMotors();
-  if (movDist == 0) {
-    closeWindow(pinMotor, swStatus, channel, softSpeed);
+void windowCtrl(const int pinMotor[3], int swStatus, uint8_t channel, int movSpeed) {
+  unsigned long currentMillis = millis();
+  if (movCMD == 0) {
+    disableMotors();
+    stopMotor(pinMotor, channel);
   }
-  else {
-    for (timeMove = 0; timeMove < 20000; timeMove++) {
-      moveMotorForward(pinMotor, channel, movSpeed);
-      traveledSpace = (float)velMove * timeMove;//* movSpeed / fullSpeed;
-      delay (1);
-      ctrlTempFan();
-      watchDogRefresh();
-      if (traveledSpace >= movDist * 0.85)movSpeed = softSpeed;
-      if (traveledSpace >= movDist)break;
+  if (movCMD == 1) {
+    enableMotors();
+    moveMotorForward(pinMotor, channel, movSpeed);
+    if (currentMillis >= timeTravelStop) {
+      movCMD = 0;
     }
   }
-  disableMotors();
-  stopMotor(pinMotor, channel);
+  if (movCMD == 2) {
+    enableMotors();
+    moveMotorBackward(pinMotor, channel, movSpeed);
+    if (currentMillis >= timeTravelStop || digitalRead(swStatus) == 0) {
+      movCMD = 0;
+    }
+  }
 }
 
 void startingIO() {
@@ -234,6 +247,7 @@ void startingIO() {
     digitalWrite(pinMotorA[i], LOW);
     digitalWrite(pinMotorB[i], LOW);
   }
+  pinMode(pinSTBY, OUTPUT);
   digitalWrite(pinSTBY, LOW); // standby on
   // Cooling system
   ledcSetup(LEDC_CHANNEL_2, LEDC_BASE_FREQ_30K, LEDC_TIMER_12_BIT);
@@ -241,8 +255,9 @@ void startingIO() {
 }
 
 void motorInitialize() {
-  closeWindow(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, softSpeed);
-  closeWindow(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, softSpeed);
+  enableMotors();
+  closeWindow(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, fullSpeed);
+  closeWindow(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, fullSpeed);
   fullStop();
 }
 
@@ -336,30 +351,40 @@ void ctrlTempFan() {
 ***********************************************************************/
 
 void buttonFunction(Button2& btn) {
-  float movDist = 0;
+  int openPerc = 0;
+  int openPerc_diff = 0;
   switch (btn.getType()) {
     case single_click:
-      movDist = 7.5;
-      Serial.print("Opening windows to 25%");
+      openPerc = 25;
       break;
     case double_click:
-      movDist = 15;
-      Serial.print("Opening windows to 50%");
+      openPerc = 50;
       break;
     case triple_click:
-      movDist = 22.5;
-      Serial.print("opening windows to 75%");
+      openPerc = 75;
       break;
     case long_click:
-      movDist = 0;
-      Serial.print("==== Closing window ====");
+      Serial.println("==== Closing window ====");
+      openPerc = 0;
       break;
   }
-  windowOpenCtrl(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, movDist, fullSpeed);
-  Serial.print("click");
-  Serial.print(" (");
-  Serial.print(btn.getNumberOfClicks());
-  Serial.println(")");
+  if (openPerc > openPerc_ant) {
+    Serial.print((String)"Opening windows to " + openPerc + "%" + '\n');
+    movCMD = 1;
+  }
+  else if (openPerc < openPerc_ant) {
+    Serial.print((String)"Closing windows to " + openPerc + "%" + '\n');
+    movCMD = 2;
+  }
+  else if (openPerc == openPerc_ant) {
+    Serial.print((String)"Window already open at " + openPerc + "%" + '\n');
+    movCMD = 0;
+  }
+  openPerc_diff = abs(openPerc - openPerc_ant);
+  openPerc_ant = openPerc;
+  timeTravelTarget = (int)openPerc_diff * motionFactor; // Travel time in ms to open the window a certain %
+  timeTravelStop = millis() + timeTravelTarget;
+  Serial.print((String)"Travel time: " + timeTravelTarget + "ms" + '\n' + "Stop time: " + timeTravelStop + "ms" + '\n');
 }
 
 void IRAM_ATTR watchDogInterrupt() {
@@ -422,8 +447,7 @@ int closeWindow(const int pinMotor[3], int swStatus, uint8_t channel, int movSpe
   int swFlag;
   if (digitalRead(swStatus) == 1) {
     Serial.println("Window opened... Closing");
-    enableMotors();
-    for (int t = 0; t < 20000; t++) {
+    for (int t = 0; t < 30000; t++) {
       moveMotorBackward(pinMotor, channel, movSpeed);
       delay (1);
       ctrlTempFan();
