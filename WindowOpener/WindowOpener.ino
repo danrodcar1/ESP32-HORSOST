@@ -125,6 +125,8 @@ int AN_Pot1_i = 0;
 
 // Other stuff
 unsigned long CHECK_TEMP_PERIOD = 500;
+String topic_string_sub = ("orchard/" + TYPE_NODE + "/");
+
 
 void IRAM_ATTR watchDogInterrupt();
 void watchDogRefresh();
@@ -355,7 +357,7 @@ void reconnect() {
   String topic_string = ("orchard/" + TYPE_NODE + "/" + clientId + "/connection");                             // Select topic by ESP ID
   const char* conexion_topic = topic_string.c_str();
 
-  String topic_string_sub = ("orchard/" + TYPE_NODE + "/" + clientId + "/control");     // Select topic by ESP ID
+  topic_string_sub += (clientId + "/activate");
   const char* subTopic = topic_string_sub.c_str();
 
   // BUCLE DE CHECKING DE CONEXIÓN AL SERVICIO MQTT
@@ -387,11 +389,25 @@ void reconnect() {
 
 void callback(char* topic, byte* payload, unsigned int length)
 {
-  DynamicJsonDocument doc(1024);
+  StaticJsonDocument<256> doc;
   Serial.print("Command from MQTT broker is : [");
   Serial.print(topic);
   Serial.println("] ");
   char message_buff[100];
+  if (strcmp(topic, topic_string_sub.c_str()) == 0)
+  {
+    int i;
+    for (i = 0; i < length; i++) {
+      message_buff[i] = payload[i];
+    }
+    message_buff[i] = '\0';
+    DeserializationError error = deserializeJson(doc, message_buff);
+    if (error) {
+      Serial.print(F("deserializeJson() failed: "));
+      Serial.println(error.f_str());
+      return;
+    }
+  }
 }
 
 void ctrlTempFan() {
