@@ -76,14 +76,21 @@ const int pinMotorA[3] = { pinPWMA, pinAIN1, pinAIN2 };
 const int pinMotorB[3] = { pinPWMB, pinBIN1, pinBIN2 };
 int lengthMotor = sizeof(pinMotorB) / sizeof(pinMotorB[0]);
 
-enum moveDirection {
-  forward,
-  backward
-};
+enum windowState {
+  ACTIVATE_RIGHT_WINDOW,
+  ACTIVATE_LEFT_WINDOW,
+  ACTIVATE_BOTH_WINDOW
+}; windowState winCMD = ACTIVATE_RIGHT_WINDOW;
 
+struct __attribute__((packed)) MQTT_MSG {
+  windowState winCMD;
+  int numRelay;
+  int cmdRelay;
+  const char* id;
+} messageReceived;
 // System calibration.- rack-pinion mechanism
 /*
-   Note: In order to avoid overheatin in the motor driver,
+   Note: In order to avoid overheating in the motor driver,
    the duty cycle will be halved and the new rpm value will be averaged
 */
 const int zPinion = 16; // number of pinion teeth (teeth)
@@ -94,7 +101,10 @@ int maxTimeOpenA = 0;
 int maxTimeOpenB = 0;
 float motionFactor = 0;
 int movCMD = 0; // 0 = STOP; 1 = FORWARD; 2 = BACKWARD
+int openPerc = 0;
+int openPerc_diff = 0;
 int timeTravelTarget = 0;
+int travelCounter = 0;
 unsigned long timeTravelStop = 0;
 int openPerc_ant = 0;
 int fullSpeed = 512;  // full duty long range movement (0-1024)..
@@ -116,7 +126,6 @@ int AN_Pot1_i = 0;
 // Other stuff
 unsigned long CHECK_TEMP_PERIOD = 500;
 
-void IRAM_ATTR onTimer();
 void IRAM_ATTR watchDogInterrupt();
 void watchDogRefresh();
 /**********************************************************************
@@ -160,8 +169,19 @@ void loop()
   client.loop();
   button.loop();
   ctrlTempFan();
-  windowCtrl(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, fullSpeed);
-  //  windowCtrl(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, fullSpeed);
+
+  if (winCMD == ACTIVATE_RIGHT_WINDOW) {
+    windowCtrl(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, fullSpeed);
+  }
+  if (winCMD == ACTIVATE_LEFT_WINDOW) {
+    windowCtrl(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, fullSpeed);
+  }
+  if (winCMD == ACTIVATE_BOTH_WINDOW) {
+    windowCtrl(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, fullSpeed);
+    windowCtrl(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, fullSpeed);
+  }
+
+
   timerManager.run();
   watchDogRefresh();
 }
@@ -200,26 +220,71 @@ int windowCalib(const int pinMotor[3], int swStatus, uint8_t channel, int movSpe
   return maxTimeOpen;
 }
 
+void motorInitialize() {
+  enableMotors();
+  closeWindow(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, fullSpeed);
+  closeWindow(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, fullSpeed);
+  fullStop();
+}
+
 void windowCtrl(const int pinMotor[3], int swStatus, uint8_t channel, int movSpeed) {
   unsigned long currentMillis = millis();
-  if (movCMD == 0) {
-    disableMotors();
-    stopMotor(pinMotor, channel);
-  }
-  if (movCMD == 1) {
-    enableMotors();
-    moveMotorForward(pinMotor, channel, movSpeed);
-    if (currentMillis >= timeTravelStop) {
-      movCMD = 0;
+  if (travelCounter <= 6) {
+    if (movCMD == 0) {
+      disableMotors();
+      stopMotor(pinMotor, channel);
+    }
+    if (movCMD == 1) {
+      enableMotors();
+      moveMotorForward(pinMotor, channel, movSpeed);
+      if (currentMillis >= timeTravelStop) {
+        movCMD = 0;
+        travelCounter++;
+      }
+    }
+    if (movCMD == 2) {
+      enableMotors();
+      moveMotorBackward(pinMotor, channel, movSpeed);
+      if (currentMillis >= timeTravelStop || digitalRead(swStatus) == 0) {
+        movCMD = 0;
+        travelCounter++;
+      }
     }
   }
-  if (movCMD == 2) {
+  else {
     enableMotors();
     moveMotorBackward(pinMotor, channel, movSpeed);
-    if (currentMillis >= timeTravelStop || digitalRead(swStatus) == 0) {
-      movCMD = 0;
+    if (digitalRead(swStatus) == 0) {
+      openPerc_ant = 0;
+      openPerc_diff = abs(openPerc - openPerc_ant);
+      timeTravelTarget = (int)openPerc_diff * motionFactor; // Travel time in ms to open the window a certain %
+      timeTravelStop = millis() + timeTravelTarget;
+      travelCounter = 0;
+      movCMD = 1;
     }
   }
+}
+
+int closeWindow(const int pinMotor[3], int swStatus, uint8_t channel, int movSpeed) {
+  int swFlag;
+  if (digitalRead(swStatus) == 1) {
+    Serial.println("Window opened... Closing");
+    for (int t = 0; t < 30000; t++) {
+      moveMotorBackward(pinMotor, channel, movSpeed);
+      delay (1);
+      ctrlTempFan();
+      watchDogRefresh();
+      if (digitalRead(swStatus) == 0) break;
+    }
+    stopMotor(pinMotor, channel);
+    swFlag = 0; //Window was closing (it was open before)
+  }
+  else if (digitalRead(swStatus) == 0) {
+    Serial.println("Window already closed");
+    swFlag = 0; //Window was already closed
+  }
+  Serial.println("Window closed");
+  return swFlag;
 }
 
 void startingIO() {
@@ -252,13 +317,6 @@ void startingIO() {
   // Cooling system
   ledcSetup(LEDC_CHANNEL_2, LEDC_BASE_FREQ_30K, LEDC_TIMER_12_BIT);
   ledcAttachPin(FAN_PWR_PIN, LEDC_CHANNEL_2);
-}
-
-void motorInitialize() {
-  enableMotors();
-  closeWindow(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, fullSpeed);
-  closeWindow(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, fullSpeed);
-  fullStop();
 }
 
 void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
@@ -351,8 +409,6 @@ void ctrlTempFan() {
 ***********************************************************************/
 
 void buttonFunction(Button2& btn) {
-  int openPerc = 0;
-  int openPerc_diff = 0;
   switch (btn.getType()) {
     case single_click:
       openPerc = 25;
@@ -440,42 +496,6 @@ void checkForUpdates() {
     case HTTP_UPDATE_OK:
       Serial.println(F(" OK"));
       break;
-  }
-}
-
-int closeWindow(const int pinMotor[3], int swStatus, uint8_t channel, int movSpeed) {
-  int swFlag;
-  if (digitalRead(swStatus) == 1) {
-    Serial.println("Window opened... Closing");
-    for (int t = 0; t < 30000; t++) {
-      moveMotorBackward(pinMotor, channel, movSpeed);
-      delay (1);
-      ctrlTempFan();
-      watchDogRefresh();
-      if (digitalRead(swStatus) == 0) break;
-    }
-    stopMotor(pinMotor, channel);
-    swFlag = 0; //Window was closing (it was open before)
-  }
-  else if (digitalRead(swStatus) == 0) {
-    Serial.println("Window already closed");
-    swFlag = 0; //Window was already closed
-  }
-  Serial.println("Window closed");
-  return swFlag;
-}
-
-void move(int direction, int speed)
-{
-  if (direction == forward)
-  {
-    moveMotorForward(pinMotorA, LEDC_CHANNEL_0, speed);
-    moveMotorForward(pinMotorB, LEDC_CHANNEL_1, speed);
-  }
-  else
-  {
-    moveMotorBackward(pinMotorA, LEDC_CHANNEL_0, speed);
-    moveMotorBackward(pinMotorB, LEDC_CHANNEL_1, speed);
   }
 }
 
