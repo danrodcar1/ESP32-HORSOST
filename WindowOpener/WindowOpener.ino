@@ -82,12 +82,7 @@ enum windowState {
   ACTIVATE_BOTH_WINDOW
 }; windowState winCMD = ACTIVATE_RIGHT_WINDOW;
 
-struct __attribute__((packed)) MQTT_MSG {
-  windowState winCMD;
-  int numRelay;
-  int cmdRelay;
-  const char* id;
-} messageReceived;
+bool ctrlMode = false; // TRUE = AUTO; FALSE = MANUAL
 // System calibration.- rack-pinion mechanism
 /*
    Note: In order to avoid overheating in the motor driver,
@@ -102,11 +97,11 @@ int maxTimeOpenB = 0;
 float motionFactor = 0;
 int movCMD = 0; // 0 = STOP; 1 = FORWARD; 2 = BACKWARD
 int openPerc = 0;
+int openPerc_ant = 0;
 int openPerc_diff = 0;
 int timeTravelTarget = 0;
 int travelCounter = 0;
 unsigned long timeTravelStop = 0;
-int openPerc_ant = 0;
 int fullSpeed = 512;  // full duty long range movement (0-1024)..
 int softSpeed = 256;  // mid duty for aprox movement (0-1024)..
 
@@ -126,7 +121,7 @@ int AN_Pot1_i = 0;
 // Other stuff
 unsigned long CHECK_TEMP_PERIOD = 500;
 String topic_string_sub = ("orchard/" + TYPE_NODE + "/");
-
+String topic_string_status = ("orchard/" + TYPE_NODE + "/");
 
 void IRAM_ATTR watchDogInterrupt();
 void watchDogRefresh();
@@ -259,6 +254,7 @@ void windowCtrl(const int pinMotor[3], int swStatus, uint8_t channel, int movSpe
     if (digitalRead(swStatus) == 0) {
       openPerc_ant = 0;
       openPerc_diff = abs(openPerc - openPerc_ant);
+      openPerc_ant = openPerc;
       timeTravelTarget = (int)openPerc_diff * motionFactor; // Travel time in ms to open the window a certain %
       timeTravelStop = millis() + timeTravelTarget;
       travelCounter = 0;
@@ -360,6 +356,8 @@ void reconnect() {
   topic_string_sub += (clientId + "/activate");
   const char* subTopic = topic_string_sub.c_str();
 
+  topic_string_status += (clientId + "/status");
+
   // BUCLE DE CHECKING DE CONEXIÓN AL SERVICIO MQTT
   while (!client.connected()) {
     Serial.print("Intentando conectarse a MQTT...");
@@ -407,6 +405,25 @@ void callback(char* topic, byte* payload, unsigned int length)
       Serial.println(error.f_str());
       return;
     }
+    winCMD = doc["winCMD"]; // 0 = RIGHT; 1 = LEFT; 2 = BOTH
+    openPerc = doc["openPerc"]; // (0..100%)
+    if (openPerc > openPerc_ant) {
+      Serial.print((String)"Opening windows to " + openPerc + "%" + '\n');
+      movCMD = 1;
+    }
+    else if (openPerc < openPerc_ant) {
+      Serial.print((String)"Closing windows to " + openPerc + "%" + '\n');
+      movCMD = 2;
+    }
+    else if (openPerc == openPerc_ant) {
+      Serial.print((String)"Window already open at " + openPerc + "%" + '\n');
+      movCMD = 0;
+    }
+    openPerc_diff = abs(openPerc - openPerc_ant);
+    openPerc_ant = openPerc;
+    timeTravelTarget = (int)openPerc_diff * motionFactor; // Travel time in ms to open the window a certain %
+    timeTravelStop = millis() + timeTravelTarget;
+    client.publish(topic_string_status.c_str(), message_buff);
   }
 }
 
