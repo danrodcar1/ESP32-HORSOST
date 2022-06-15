@@ -16,9 +16,7 @@
 ***********************************************************************/
 
 // ESP32  WiFi & UPDATE SERVER
-//WiFiClientSecure espClient;
-WiFiClient espClient;
-
+WiFiClientSecure espClient;
 PubSubClient client(espClient);
 
 const unsigned char FWVER[] =
@@ -80,9 +78,8 @@ enum windowState {
   ACTIVATE_RIGHT_WINDOW,
   ACTIVATE_LEFT_WINDOW,
   ACTIVATE_BOTH_WINDOW
-}; windowState winCMD = ACTIVATE_RIGHT_WINDOW;
+}; windowState winCMD = ACTIVATE_BOTH_WINDOW;
 
-bool ctrlMode = false; // TRUE = AUTO; FALSE = MANUAL
 // System calibration.- rack-pinion mechanism
 /*
    Note: In order to avoid overheating in the motor driver,
@@ -119,7 +116,6 @@ uint32_t AN_Pot1_Buffer[FILTER_LEN] = {0};
 int AN_Pot1_i = 0;
 
 // Other stuff
-unsigned long CHECK_TEMP_PERIOD = 500;
 String topic_string_sub = ("orchard/" + TYPE_NODE + "/");
 String topic_string_status = ("orchard/" + TYPE_NODE + "/");
 
@@ -140,7 +136,6 @@ void setup()
 
   checkForUpdates();
   timerManager.setInterval(CHECK_UPDATE_TIMER * 60000L, checkForUpdates); // Look for update each 10'
-  timerManager.setInterval(CHECK_TEMP_PERIOD, ctrlTempFan);
 
   //init watchdog
   watchDogTimer = timerBegin(0, 80, true); //timer 0, div80
@@ -177,7 +172,6 @@ void loop()
     windowCtrl(pinMotorA, END_SW_PIN[0], LEDC_CHANNEL_0, fullSpeed);
     windowCtrl(pinMotorB, END_SW_PIN[1], LEDC_CHANNEL_1, fullSpeed);
   }
-
 
   timerManager.run();
   watchDogRefresh();
@@ -342,8 +336,8 @@ void connectToNetwork() {
   Serial.println("WiFi conectado");
   Serial.println("Direccion IP: ");
   Serial.println(WiFi.localIP());
-  //  espClient.setInsecure();
-  //  espClient.setTimeout(12);
+  espClient.setInsecure();
+  espClient.setTimeout(12);
 }
 
 void reconnect() {
@@ -429,6 +423,7 @@ void callback(char* topic, byte* payload, unsigned int length)
 
 void ctrlTempFan() {
   float currentTemperature = readTemp();
+  //  Serial.println(currentTemperature);
   if ((currentTemperature > targetTemp) && (abs(currentTemperature - targetTemp) >= errorTemp)) {
     ledcWrite(LEDC_CHANNEL_2, 4096);   // Turn-on fan
   }
