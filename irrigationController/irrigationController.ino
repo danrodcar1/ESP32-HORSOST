@@ -122,13 +122,8 @@ void connectToNetwork() {
 void createTopic() {  
   uint32_t chipID = ESP.getChipId();
   clientId += String(chipID);
-
   topic_string_connect += (clientId + "/connection");
-  const char* conexion_topic = topic_string_connect.c_str();
-
   topic_string_sub += (clientId + "/activate");
-  const char* subTopic = topic_string_sub.c_str();
-
   topic_string_time += (clientId + "/progTime");
   topic_string_status += (clientId + "/status");
 }
