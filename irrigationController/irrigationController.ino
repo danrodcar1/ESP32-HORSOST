@@ -16,9 +16,11 @@ WiFiClientSecure espClient;
 PubSubClient client(espClient);
 SimpleTimer timerManager; //timer declaration
 
+String clientId = "ESP8266Client-";
 String topic_string_connect = ("orchard/" + TYPE_NODE + "/");
 String topic_string_sub = ("orchard/" + TYPE_NODE + "/");
 String topic_string_status = ("orchard/" + TYPE_NODE + "/");
+String topic_string_time = ("orchard/" + TYPE_NODE + "/");
 
 const int systemRelayOutput[] = {4, 5};//4:=relay1;5:=relay2;12:=led1;14:=led2
 const int systemLedOutput[] = {12, 14};
@@ -34,6 +36,8 @@ struct __attribute__((packed)) MQTT_MSG {
   const char* id;
 } messageReceived;
 
+unsigned long lwdpreviousMillis;
+
 void irrigationControllerManual(struct MQTT_MSG msgRcv);
 /**********************************************************************
   ARDUINO SETUP & MAIN LOOP
@@ -43,6 +47,7 @@ void setup() {
 
   Serial.begin(115200);
   connectToNetwork();
+  createTopic();
   client.setServer(MQTT_SERVER, MQTT_PORT);
   client.setCallback(callback);
   client.setBufferSize(512);
@@ -52,8 +57,6 @@ void setup() {
 
   blinkLedTimer = timerManager.setInterval(500, blinkLed);
   timerManager.disable(blinkLedTimer);
-
-  ESP.wdtEnable(WATCHDOG_TIMEOUT_S * 1000);
 
   //Inicializamos el LED y el ID de la placa.
   pinMode(LED_BUILTIN, OUTPUT);
@@ -67,6 +70,7 @@ void setup() {
     digitalWrite(systemRelayOutput[i], HIGH);
     digitalWrite(systemLedOutput[i], LOW);
   }
+  lwdpreviousMillis = millis();
 }
 
 void loop() {
@@ -79,8 +83,15 @@ void loop() {
   //Esta llamada para que la librería recupere el controlz
   client.loop();
 
+  if ((unsigned long)(rightNow - lwdpreviousMillis) >= 30L * 60000L)
+  {
+    char time_Buff[100];
+    sprintf(time_Buff, "%lu", rightNow);
+    client.publish(topic_string_time.c_str(), time_Buff);
+    lwdpreviousMillis = millis();
+  }
+
   timerManager.run();
-  ESP.wdtFeed();
 }
 
 /***********************************************************************
@@ -108,8 +119,7 @@ void connectToNetwork() {
   espClient.setTimeout(12);
 }
 
-void reconnect() {
-  String clientId = "ESP8266Client-";
+void createTopic() {  
   uint32_t chipID = ESP.getChipId();
   clientId += String(chipID);
 
@@ -119,8 +129,11 @@ void reconnect() {
   topic_string_sub += (clientId + "/activate");
   const char* subTopic = topic_string_sub.c_str();
 
+  topic_string_time += (clientId + "/progTime");
   topic_string_status += (clientId + "/status");
+}
 
+void reconnect() {
   // BUCLE DE CHECKING DE CONEXIÓN AL SERVICIO MQTT
   while (!client.connected()) {
     Serial.print("Intentando conectarse a MQTT...");
@@ -133,14 +146,14 @@ void reconnect() {
     Serial.println(clientId);
 
     // Intentando conectar
-    if (client.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD, conexion_topic, 2, true, "Offline", true)) {
+    if (client.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD, topic_string_connect.c_str(), 2, true, "Offline", true)) {
       Serial.println("conectado");
       // Nos suscribimos a los siguientes topics
-      client.subscribe(subTopic);
-      Serial.printf("\r\Subscribed to:\t%s", subTopic);
+      client.subscribe(topic_string_sub.c_str());
+      Serial.printf("\r\Subscribed to:\t%s", topic_string_sub.c_str());
       Serial.println();
       // Publicamos el estado de la conexion en el topic
-      client.publish(conexion_topic, "Online", true);
+      client.publish(topic_string_connect.c_str(), "Online", true);
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -175,8 +188,8 @@ void callback(char* topic, byte* payload, unsigned int length)
     messageReceived.id = doc["id"];
     messageReceived.numRelay = doc["rele"];
     messageReceived.cmdRelay  = doc["comando"];
-    irrigationController(messageReceived);
     client.publish(topic_string_status.c_str(), message_buff);
+    irrigationController(messageReceived);
   }
 }
 
@@ -266,7 +279,6 @@ void update_progress(int cur, int total) {
 void update_error(int err) {
   Serial.printf("CALLBACK:  HTTP update fatal error code %d\n", err);
 }
-
 
 /***********************************************************************
    INTERRUPT FUNCTIONS
