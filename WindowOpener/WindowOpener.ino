@@ -116,6 +116,8 @@ uint32_t AN_Pot1_Buffer[FILTER_LEN] = {0};
 int AN_Pot1_i = 0;
 
 // Other stuff
+String clientId = "ESP8266Client-";
+String topic_string_connect = ("orchard/" + TYPE_NODE + "/");
 String topic_string_sub = ("orchard/" + TYPE_NODE + "/");
 String topic_string_status = ("orchard/" + TYPE_NODE + "/");
 
@@ -130,6 +132,7 @@ void setup()
   Serial.begin(115200);
   startingIO();
   connectToNetwork();
+  createTopic();
   client.setServer(MQTT_SERVER, MQTT_PORT);
   client.setCallback(callback);
   client.setBufferSize(512);
@@ -340,18 +343,15 @@ void connectToNetwork() {
   espClient.setTimeout(12);
 }
 
-void reconnect() {
-  String clientId = "ESP32Client-";
+void createTopic() {  
   uint32_t chipID = ESP.getEfuseMac();
   clientId += String(chipID);
-  String topic_string = ("orchard/" + TYPE_NODE + "/" + clientId + "/connection");                             // Select topic by ESP ID
-  const char* conexion_topic = topic_string.c_str();
-
-  topic_string_sub += (clientId + "/activate");
-  const char* subTopic = topic_string_sub.c_str();
-
+  topic_string_connect += (clientId + "/connection");
+  topic_string_sub += (clientId + "/activate");  
   topic_string_status += (clientId + "/status");
+}
 
+void reconnect() {
   // BUCLE DE CHECKING DE CONEXIÓN AL SERVICIO MQTT
   while (!client.connected()) {
     Serial.print("Intentando conectarse a MQTT...");
@@ -361,14 +361,14 @@ void reconnect() {
     Serial.println(clientId);
 
     // Intentando conectar
-    if (client.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD, conexion_topic, 2, true, "Offline", true)) {
+    if (client.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD, topic_string_connect.c_str(), 2, true, "Offline", true)) {
       Serial.println("conectado");
       // Nos suscribimos a los siguientes topics
-      client.subscribe(subTopic);
-      Serial.printf("\r\Subscribed to:\t%s", subTopic);
+      client.subscribe(topic_string_sub.c_str());
+      Serial.printf("\r\Subscribed to:\t%s", topic_string_sub.c_str());
       Serial.println();
       // Publicamos el estado de la conexion en el topic
-      client.publish(conexion_topic, "Online", true);
+      client.publish(topic_string_connect.c_str(), "Online", true);
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
