@@ -20,7 +20,6 @@ String clientId = "ESP8266Client-";
 String topic_string_connect = ("orchard/" + TYPE_NODE + "/");
 String topic_string_sub = ("orchard/" + TYPE_NODE + "/");
 String topic_string_status = ("orchard/" + TYPE_NODE + "/");
-String topic_string_time = ("orchard/" + TYPE_NODE + "/");
 
 const int systemRelayOutput[] = {4, 5};//4:=relay1;5:=relay2;12:=led1;14:=led2
 const int systemLedOutput[] = {12, 14};
@@ -35,8 +34,6 @@ struct __attribute__((packed)) MQTT_MSG {
   int cmdRelay;
   const char* id;
 } messageReceived;
-
-unsigned long lwdpreviousMillis;
 
 void irrigationControllerManual(struct MQTT_MSG msgRcv);
 /**********************************************************************
@@ -70,7 +67,6 @@ void setup() {
     digitalWrite(systemRelayOutput[i], HIGH);
     digitalWrite(systemLedOutput[i], LOW);
   }
-  lwdpreviousMillis = millis();
 }
 
 void loop() {
@@ -82,14 +78,6 @@ void loop() {
   if (!client.connected()) reconnect();
   //Esta llamada para que la librería recupere el controlz
   client.loop();
-
-  if ((unsigned long)(rightNow - lwdpreviousMillis) >= 30L * 60000L)
-  {
-    char time_Buff[100];
-    sprintf(time_Buff, "%lu", rightNow);
-    client.publish(topic_string_time.c_str(), time_Buff);
-    lwdpreviousMillis = millis();
-  }
 
   timerManager.run();
 }
@@ -124,7 +112,6 @@ void createTopic() {
   clientId += String(chipID);
   topic_string_connect += (clientId + "/connection");
   topic_string_sub += (clientId + "/activate");
-  topic_string_time += (clientId + "/progTime");
   topic_string_status += (clientId + "/status");
 }
 
