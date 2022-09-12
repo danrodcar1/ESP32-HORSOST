@@ -7,4 +7,4 @@ En este fichero encontrará varios proyectos que se han ido realizando en parale
 3. NODE-RED_FLOW: Flujo realizado en NODE-RED para la representación y tratamiento de datos del dispositivo que mide el viento y la lluvia en la estación.
 4. IrrigationController: Fichero que incluye rutina de control de dos programadores del huerto (MAN/AUTO) usando relés.
 5. windowOpener: Fichero que incluye diseños 3D tanto propios como modificados de [Frogale](https://www.thingiverse.com/thing:4779978) que permiten la apertura de las ventanas del invernadero. Se añade la rutina de control del sistema.
-
+6. WeatherMonitoring: Fichero similar al ESP32_HORTSOST, basado en un ESP8266
