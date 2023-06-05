@@ -378,19 +378,19 @@ void adc_multisampling(struct_adclist *my_reads,adc_digi_output_data_t *p){
 	switch ( p->type2.channel )
 	{
 	case 0:
-		my_reads->adc_read[0].adc_raw=(int)p->type2.data;
+		my_reads->adc_read[0].adc_raw=p->type2.data;
 		my_reads->adc_read[0].adc_filtered=read_adc_avg(my_reads,0);
 		break;
 	case 1:
-		my_reads->adc_read[1].adc_raw=(int)p->type2.data;
+		my_reads->adc_read[1].adc_raw=p->type2.data;
 		my_reads->adc_read[1].adc_filtered=read_adc_avg(my_reads,1);
 		break;
 	case 2:
-		my_reads->adc_read[2].adc_raw=(int)p->type2.data;
+		my_reads->adc_read[2].adc_raw=p->type2.data;
 		my_reads->adc_read[2].adc_filtered=read_adc_avg(my_reads,2);
 		break;
 	case 4:
-		my_reads->adc_read[3].adc_raw=(int)p->type2.data;
+		my_reads->adc_read[3].adc_raw=p->type2.data;
 		my_reads->adc_read[3].adc_filtered=read_adc_avg(my_reads,3);
 		break;
 	}
