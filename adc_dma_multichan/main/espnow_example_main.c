@@ -42,6 +42,7 @@
 #include "AUTOpairing_common.h"
 #include "esp_sleep.h"
 
+
 // DEEP SLEEP VARS
 int wakeup_time_sec;
 bool debug = false;
@@ -125,6 +126,7 @@ typedef struct{
 	uint32_t adc_buff[FILTER_LEN];	/*4 bytes*/
 	uint32_t sum;						/*4 bytes*/
 	int AN_i;						/*4 bytes*/
+	char adc_msg[256];
 }struct_adcread;
 
 typedef struct{
@@ -134,6 +136,7 @@ typedef struct{
 //static_assert(sizeof(struct_adclist) == 8);
 
 unsigned long convertion_time = 2000;
+unsigned long previous_conv_time = 0;
 
 static uint8_t s_led_state = 0;
 
@@ -479,7 +482,7 @@ void autopairing_init()
 	wifi_init();
 	semaforo_envio = xSemaphoreCreateBinary();
 	cola_resultado_enviados = xQueueCreate(10, sizeof(espnow_send_cb_t));
-	xTaskCreate(mantener_conexion, "conexion", 2048, NULL, 2, &conexion_hand);
+	xTaskCreate(mantener_conexion, "conexion", 4096, NULL, 2, &conexion_hand);
 }
 
 uint32_t read_adc_avg(struct_adclist *ADC_Raw, int chn)
@@ -528,7 +531,6 @@ void init_adc_dma_mode(){
 	uint8_t result[READ_LEN] = {0};
 	memset(result, 0xcc, READ_LEN);
 
-
 	s_task_handle = xTaskGetCurrentTaskHandle();
 
 	adc_continuous_handle_t handle = NULL;
@@ -568,18 +570,31 @@ void init_adc_dma_mode(){
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
 		while (conv_on) {
-			unsigned long init_time = esp_timer_get_time();
+			unsigned long current_conv_time = esp_timer_get_time();
+
 			ret = adc_continuous_read(handle, result, READ_LEN, &ret_num, 0);
 			if (ret == ESP_OK) {
-				if(debug) ESP_LOGI(TAG2, "ret is %x, ret_num is %"PRIu32, ret, ret_num);
+				//if(debug) ESP_LOGI(TAG2, "ret is %x, ret_num is %"PRIu32, ret, ret_num);
 				for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES) {
 					adc_digi_output_data_t *p = (void*)&result[i];
 					if (check_valid_data(p)) {
 						//Multisampling each channel and take average reading
 						adc_multisampling(my_reads,p);
 
-						if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Raw_value: %x", 1, p->type2.channel, p->type2.data);
-						if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Filtered_value: %lu", 1, p->type2.channel, my_reads->adc_read[0].adc_filtered);
+//						if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Raw_value: %x", 1, p->type2.channel, p->type2.data);
+//						if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Filtered_value: %lu", 1, 0, my_reads->adc_read[0].adc_filtered);
+
+						if((current_conv_time - previous_conv_time)/1000 >= convertion_time){
+							sprintf(my_reads->adc_read[0].adc_msg,"{\"adc_filtered\":\"%lu\"}",my_reads->adc_read[0].adc_filtered);
+//							if((espnow_send(my_reads->adc_read[0].adc_msg,DATA))!=ENVIO_OK)
+//							{
+//								//hubo un error
+//								//ver qué pasó y actuar (ir a dormir)?
+//							}
+							previous_conv_time = current_conv_time;
+							ESP_LOGI(TAG2,"Instant time = %lu", previous_conv_time);
+							if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Filtered_value: %lu", 1, 0, my_reads->adc_read[0].adc_filtered);
+						}
 
 					} else {
 						if(debug) ESP_LOGI(TAG2, "Invalid data");
@@ -625,39 +640,39 @@ void app_main(void) {
 	autopairing_init();
 	//example_wifi_init();
 	//example_espnow_init();
-	xTaskCreate(&blinky, "blinky", 1024,NULL,4,NULL );
+	xTaskCreate(&blinky, "blinky", 2048,NULL,4,NULL );
 	//adc_init();
 	/* Configure the peripheral according to the LED type */
 
 	//adc_init(NULL);
 	// xTaskCreate(TaskBlink, "task1", 128, NULL, 1, NULL );
 
-	if(debug) ESP_LOGI(TAG, "Hello world!!!");
+//	if(debug) ESP_LOGI(TAG, "Hello world!!!");
+//
+//	if(debug) ESP_LOGI(TAG, "INIT...");
+//
+//
+//
+//	if(debug) ESP_LOGI(TAG, "ENVIO 1");
+//
+//	if((resultado=espnow_send("{\"txt\":\"hola1\"}",DATA))!=ENVIO_OK)
+//	{
+//		//hubo un error
+//		//ver qué pasó y actuar (ir a dormir)?
+//	}
+//
+//
+//	vTaskDelay( 2000 / portTICK_PERIOD_MS );
+//
+//	if(debug) ESP_LOGI(TAG, "ENVIO 2");
+//
+//	if((resultado=espnow_send("{\"txt\":\"hola2\"}",DATA))!=ENVIO_OK)
+//	{
+//		//hubo un error
+//		//ver qué pasó y actuar (ir a dormir)?
+//	}
+//
+//	if(debug) ESP_LOGI(TAG, "FIN DEL MAIN APP");
 
-	if(debug) ESP_LOGI(TAG, "INIT...");
-
-
-
-	if(debug) ESP_LOGI(TAG, "ENVIO 1");
-
-	if((resultado=espnow_send("{\"txt\":\"hola1\"}",DATA))!=ENVIO_OK)
-	{
-		//hubo un error
-		//ver qué pasó y actuar (ir a dormir)?
-	}
-
-
-	vTaskDelay( 2000 / portTICK_PERIOD_MS );
-
-	if(debug) ESP_LOGI(TAG, "ENVIO 2");
-
-	if((resultado=espnow_send("{\"txt\":\"hola2\"}",DATA))!=ENVIO_OK)
-	{
-		//hubo un error
-		//ver qué pasó y actuar (ir a dormir)?
-	}
-
-	if(debug) ESP_LOGI(TAG, "FIN DEL MAIN APP");
-
-	//init_adc_dma_mode();
+	init_adc_dma_mode();
 }
