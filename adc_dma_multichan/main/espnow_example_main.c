@@ -17,6 +17,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>
 #include <string.h>
 #include <assert.h>
 #include "freertos/FreeRTOS.h"
@@ -39,6 +40,16 @@
 #include "espnow_example.h"
 #include "esp_adc/adc_continuous.h"
 #include "AUTOpairing_common.h"
+#include "esp_sleep.h"
+
+// DEEP SLEEP VARS
+int wakeup_time_sec;
+bool debug = false;
+unsigned long timeOut;
+unsigned long start_time;
+bool timeOutEnabled;
+
+static RTC_DATA_ATTR struct timeval sleep_enter_time;
 
 #define CANAL 1
 
@@ -61,15 +72,17 @@ static const char *TAG  = "* mainApp";
 static const char *TAG2 = "* adc_reads";
 static const char *TAG3 = "* task conexion";
 static const char *TAG4 = "* funcion envio";
+static const char *TAG8 = "* funcion recivo";
 static const char *TAG5 = "* init espnow";
 static const char *TAG6 = "* callbacks espnow";
+static const char *TAG7 = "* deep sleep";
 
 static QueueHandle_t cola_resultado_enviados;
 static SemaphoreHandle_t semaforo_envio;
 
 typedef struct {
-    uint8_t mac_addr[ESP_NOW_ETH_ALEN];
-    esp_now_send_status_t status;
+	uint8_t mac_addr[ESP_NOW_ETH_ALEN];
+	esp_now_send_status_t status;
 } espnow_send_cb_t;
 
 PairingStatus pairingStatus=PAIR_REQUEST;
@@ -83,6 +96,7 @@ static QueueHandle_t s_example_espnow_queue;
 
 static uint8_t s_example_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
+uint8_t mac_address[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
 // VARIABLES
 
 bool conv_on;
@@ -119,52 +133,52 @@ typedef struct{
 }struct_adclist;
 //static_assert(sizeof(struct_adclist) == 8);
 
-unsigned long millis = 0;
+unsigned long convertion_time = 2000;
 
 static uint8_t s_led_state = 0;
 
 static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
 {
-    BaseType_t mustYield = pdFALSE;
-    //Notify that ADC continuous driver has done enough number of conversions
-    vTaskNotifyGiveFromISR(s_task_handle, &mustYield);
+	BaseType_t mustYield = pdFALSE;
+	//Notify that ADC continuous driver has done enough number of conversions
+	vTaskNotifyGiveFromISR(s_task_handle, &mustYield);
 
-    return (mustYield == pdTRUE);
+	return (mustYield == pdTRUE);
 }
 
 static void continuous_adc_init(adc_channel_t *channel, uint8_t channel_num, adc_continuous_handle_t *out_handle)
 {
-    adc_continuous_handle_t handle = NULL;
+	adc_continuous_handle_t handle = NULL;
 
-    adc_continuous_handle_cfg_t adc_config = {
-        .max_store_buf_size = 1024,
-        .conv_frame_size = READ_LEN,
-    };
-    ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &handle));
+	adc_continuous_handle_cfg_t adc_config = {
+			.max_store_buf_size = 1024,
+			.conv_frame_size = READ_LEN,
+	};
+	ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &handle));
 
-    adc_continuous_config_t dig_cfg = {
-        .sample_freq_hz = 20 * 1000,
-        .conv_mode = ADC_CONV_MODE,
-        .format = ADC_OUTPUT_TYPE,
-    };
+	adc_continuous_config_t dig_cfg = {
+			.sample_freq_hz = 20 * 1000,
+			.conv_mode = ADC_CONV_MODE,
+			.format = ADC_OUTPUT_TYPE,
+	};
 
-    adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
-    dig_cfg.pattern_num = channel_num;
-    for (int i = 0; i < channel_num; i++) {
-        uint8_t unit = ADC_UNIT_1;
-        uint8_t ch = channel[i] & 0x7;
-        adc_pattern[i].atten = ADC_ATTEN;
-        adc_pattern[i].channel = ch;
-        adc_pattern[i].unit = unit;
-        adc_pattern[i].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
+	adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
+	dig_cfg.pattern_num = channel_num;
+	for (int i = 0; i < channel_num; i++) {
+		uint8_t unit = ADC_UNIT_1;
+		uint8_t ch = channel[i] & 0x7;
+		adc_pattern[i].atten = ADC_ATTEN;
+		adc_pattern[i].channel = ch;
+		adc_pattern[i].unit = unit;
+		adc_pattern[i].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
 
-        ESP_LOGI(TAG, "adc_pattern[%d].atten is :%x", i, adc_pattern[i].atten);
-        ESP_LOGI(TAG, "adc_pattern[%d].channel is :%x", i, adc_pattern[i].channel);
-        ESP_LOGI(TAG, "adc_pattern[%d].unit is :%x", i, adc_pattern[i].unit);
-    }
-    dig_cfg.adc_pattern = adc_pattern;
-    ESP_ERROR_CHECK(adc_continuous_config(handle, &dig_cfg));
-    *out_handle = handle;
+		if(debug) ESP_LOGI(TAG, "adc_pattern[%d].atten is :%x", i, adc_pattern[i].atten);
+		if(debug) ESP_LOGI(TAG, "adc_pattern[%d].channel is :%x", i, adc_pattern[i].channel);
+		if(debug) ESP_LOGI(TAG, "adc_pattern[%d].unit is :%x", i, adc_pattern[i].unit);
+	}
+	dig_cfg.adc_pattern = adc_pattern;
+	ESP_ERROR_CHECK(adc_continuous_config(handle, &dig_cfg));
+	*out_handle = handle;
 }
 
 static bool check_valid_data(const adc_digi_output_data_t *data)
@@ -180,23 +194,66 @@ void blinky(void *pvParameter)
 	gpio_reset_pin(TRIGGER_ADC_PIN);
 	gpio_reset_pin(BLINK_GPIO);
 
-    /* Set the GPIO as a push/pull output */
-    gpio_set_direction(TRIGGER_ADC_PIN, GPIO_MODE_OUTPUT);
-    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-    while(1) {
-        /* Blink off (output low) */
-        gpio_set_level(TRIGGER_ADC_PIN, 0);
-        gpio_set_level(BLINK_GPIO, 0);
-        conv_on = false;
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
-        /* Blink on (output high) */
-        gpio_set_level(TRIGGER_ADC_PIN, 1);
-        gpio_set_level(BLINK_GPIO, 1);
-        conv_on = true;
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
-    }
+	/* Set the GPIO as a push/pull output */
+	gpio_set_direction(TRIGGER_ADC_PIN, GPIO_MODE_OUTPUT);
+	gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+	while(1) {
+		/* Blink off (output low) */
+		gpio_set_level(TRIGGER_ADC_PIN, 0);
+		gpio_set_level(BLINK_GPIO, 0);
+		conv_on = false;
+		vTaskDelay(convertion_time / portTICK_PERIOD_MS);
+		/* Blink on (output high) */
+		gpio_set_level(TRIGGER_ADC_PIN, 1);
+		gpio_set_level(BLINK_GPIO, 1);
+		conv_on = true;
+		vTaskDelay(convertion_time / portTICK_PERIOD_MS);
+	}
 }
 
+//-----------------------------------------------------------
+void set_debug(bool _debug)
+{
+	debug = _debug;
+}
+
+//-----------------------------------------------------------
+void set_deepSleep(int _wakeup_time_sec)
+{
+	wakeup_time_sec=_wakeup_time_sec;
+}
+
+void set_timeOut(unsigned long _timeOut, bool _enable)
+{
+ timeOut = _timeOut;
+ timeOutEnabled = _enable;
+}
+
+//--------------------------------------------------------
+void gotoSleep() {
+	// add some randomness to avoid collisions with multiple devices
+	if(debug) ESP_LOGI(TAG7, "Apaga y vamonos");
+	ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000));
+	// enter deep sleep
+	esp_deep_sleep_start();
+}
+
+static void get_mac_address()
+{
+    uint8_t mac[ESP_NOW_ETH_ALEN];
+    esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
+    ESP_LOGI("MAC address", "MAC address: %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+static void set_mac_address(uint8_t *mac)
+{
+    esp_err_t err = esp_wifi_set_mac(ESP_IF_WIFI_STA, mac);
+    if (err == ESP_OK) {
+        ESP_LOGI("MAC address", "MAC address successfully set to %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    } else {
+        ESP_LOGE("MAC address", "Failed to set MAC address");
+    }
+}
 
 /* WiFi should start before using ESPNOW */
 static void wifi_init(void) {
@@ -207,12 +264,14 @@ static void wifi_init(void) {
 	ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
 	ESP_ERROR_CHECK(esp_wifi_set_mode(ESPNOW_WIFI_MODE));
 	ESP_ERROR_CHECK(esp_wifi_start());
-	//ESP_ERROR_CHECK(esp_wifi_set_channel(espnow_channel, WIFI_SECOND_CHAN_NONE));
+	get_mac_address();
+	set_mac_address(mac_address);
 
 #if CONFIG_ESPNOW_ENABLE_LONG_RANGE
-    ESP_ERROR_CHECK( esp_wifi_set_protocol(ESPNOW_WIFI_IF, WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_LR) );
+	ESP_ERROR_CHECK( esp_wifi_set_protocol(ESPNOW_WIFI_IF, WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_LR) );
 #endif
 }
+
 
 
 /* ESPNOW sending or receiving callback function is called in WiFi task.
@@ -225,8 +284,8 @@ static void espnow_send_cb(const uint8_t *mac_addr,	esp_now_send_status_t status
 	}
 
 
-	ESP_LOGI(TAG4, "ENVIO ESPNOW status: %s", (status)?"ERROR":"OK");
-	ESP_LOGI(TAG4, "MAC: %02X:%02X:%02X:%02X:%02X:%02X",mac_addr[5],mac_addr[4],mac_addr[3],mac_addr[2],mac_addr[1],mac_addr[0]);
+	if(debug) ESP_LOGI(TAG4, "ENVIO ESPNOW status: %s", (status)?"ERROR":"OK");
+	if(debug) ESP_LOGI(TAG4, "MAC: %02X:%02X:%02X:%02X:%02X:%02X",mac_addr[5],mac_addr[4],mac_addr[3],mac_addr[2],mac_addr[1],mac_addr[0]);
 
 	if(pairingStatus==PAIR_PAIRED)  // será un mensaje a la pasarela, se podría comprobar la mac
 	{
@@ -248,12 +307,18 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
 		return;
 	}
 
-	ESP_LOGI(TAG4, "RECEPCION ESPNOW len: %d", len);
-	ESP_LOGI(TAG4, "canal: %d", punt->channel);
-	ESP_LOGI(TAG4, "MAC: %02X:%02X:%02X:%02X:%02X:%02X",punt->macAddr[5],punt->macAddr[4],punt->macAddr[3],punt->macAddr[2],punt->macAddr[1],punt->macAddr[0]);
+	if(debug) ESP_LOGI(TAG8, "RECEPCION ESPNOW len: %d", len);
+	if(debug) ESP_LOGI(TAG8, "canal: %d", punt->channel);
+	if(debug) ESP_LOGI(TAG8, "MAC: %02X:%02X:%02X:%02X:%02X:%02X",punt->macAddr[5],punt->macAddr[4],punt->macAddr[3],punt->macAddr[2],punt->macAddr[1],punt->macAddr[0]);
 
-	if ((type & MASK_MSG_TYPE ) == PAIRING) // mensaje resultado de emparejamiento
-	{
+	switch (type & MASK_MSG_TYPE){
+	case NODATA:
+		if(debug) ESP_LOGI(TAG8, "NO HAY MENSAJES MQTT");
+		break;
+	case DATA:
+		if(debug) ESP_LOGI(TAG8, "Mensaje recibido MQTT");
+		break;
+	case PAIRING:
 		esp_now_peer_info_t peer;
 		peer.channel = punt->channel;
 		peer.ifidx = ESPNOW_WIFI_IF;
@@ -262,64 +327,61 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
 		ESP_ERROR_CHECK( esp_now_add_peer(&peer) );
 		memcpy(pairingData.macAddr, punt->macAddr, 6);
 		pairingData.channel=punt->channel;
-		ESP_LOGI(TAG4, "ADD PASARELA PEER");
+		if(debug) ESP_LOGI(TAG8, "ADD PASARELA PEER");
 		pairingStatus=PAIR_PAIRED;
-		ESP_LOGI(TAG4, "LIBERADO SEMAFORO ENVIO: EMPAREJAMIENTO");
+		if(debug) ESP_LOGI(TAG8, "LIBERADO SEMAFORO ENVIO: EMPAREJAMIENTO");
 		xSemaphoreGive(semaforo_envio);
-	}
-	else
-	{ // otros mensajes
+		break;
 	}
 }
 
 //-----------------------------------------------------------
-uint8_t espnow_send(char * mensaje)
-  {
-	uint8_t _msgType = DATA; // poner como parámetro ??
-	ESP_LOGI(TAG3, "ESPERANDO SEMAFORO ENVIO");
+uint8_t espnow_send(char * mensaje, uint8_t _msgType)
+{
+	if(debug) ESP_LOGI(TAG3, "ESPERANDO SEMAFORO ENVIO");
 
 	if(xSemaphoreTake(semaforo_envio, 3000 / portTICK_PERIOD_MS) == pdFALSE )
 	{
 
-	    ESP_LOGE(TAG3, "Error esperando a enviar");
-	    return ERROR_NOT_PAIRED;
-	    // a dormir?
+		ESP_LOGE(TAG3, "Error esperando a enviar");
+		return ERROR_NOT_PAIRED;
+		// a dormir?
 	}
-    //_msgType = _msgType ;
-    ESP_LOGI(TAG3, "sending message type = %d",_msgType);
+	//_msgType = _msgType ;
+	if(debug) ESP_LOGI(TAG3, "sending message type = %d",_msgType);
 
-    int size = strlen(mensaje);
-    if (size> 249)
-    {
-      ESP_LOGE(TAG3, "Error longitud del mensaje demasido grande: %d\n", size);
-      return ERROR_MSG_TOO_LARGE;
-    }
-    struct struct_espnow mensaje_esp;
-    mensaje_esp.msgType=_msgType;
-    memcpy(mensaje_esp.payload, mensaje, size);
-    ESP_LOGI(TAG3, "Longitud del mensaje: %d\n", size);
-    ESP_LOGI(TAG3, "mensaje: %s\n", mensaje);
-    esp_now_send(pairingData.macAddr, (uint8_t *) &mensaje_esp, size+1);
-    espnow_send_cb_t resultado;
-    ESP_LOGI(TAG3, "ESPERANDO RESULTADO ENVIO");
-    if(xQueueReceive(cola_resultado_enviados, &resultado, 200 / portTICK_PERIOD_MS)== pdFALSE)
-    {
+	int size = strlen(mensaje);
+	if (size> 249)
+	{
+		ESP_LOGE(TAG3, "Error longitud del mensaje demasido grande: %d\n", size);
+		return ERROR_MSG_TOO_LARGE;
+	}
+	struct struct_espnow mensaje_esp;
+	mensaje_esp.msgType=_msgType;
+	memcpy(mensaje_esp.payload, mensaje, size);
+	if(debug) ESP_LOGI(TAG3, "Longitud del mensaje: %d\n", size);
+	if(debug) ESP_LOGI(TAG3, "mensaje: %s\n", mensaje);
+	esp_now_send(pairingData.macAddr, (uint8_t *) &mensaje_esp, size+1);
+	espnow_send_cb_t resultado;
+	if(debug) ESP_LOGI(TAG3, "ESPERANDO RESULTADO ENVIO");
+	if(xQueueReceive(cola_resultado_enviados, &resultado, 200 / portTICK_PERIOD_MS)== pdFALSE)
+	{
 		ESP_LOGE(TAG3, "Error esperando resultado envío");
-	    return ERROR_SIN_RESPUESTA;
-    }
-    // chequar resultado y ver que hacemos
-    // también habría que limitar la espera a 100ms por ejemplo
-    xSemaphoreGive(semaforo_envio);
-    ESP_LOGI(TAG3, "LIBERADO SEMAFORO ENVIO: FIN ENVIO");
-    if(resultado.status) return ERROR_ENVIO_ESPNOW; else return ENVIO_OK;
-  }
+		return ERROR_SIN_RESPUESTA;
+	}
+	// chequar resultado y ver que hacemos
+	// también habría que limitar la espera a 100ms por ejemplo
+	xSemaphoreGive(semaforo_envio);
+	if(debug) ESP_LOGI(TAG3, "LIBERADO SEMAFORO ENVIO: FIN ENVIO");
+	if(resultado.status) return ERROR_ENVIO_ESPNOW; else return ENVIO_OK;
+}
 
 
 //-----------------------------------------------------------
 
 static esp_err_t espnow_init(void) {
 
-	ESP_LOGI(TAG, "Pairing request on channel %u\n", espnow_channel);
+	if(debug) ESP_LOGI(TAG, "Pairing request on channel %u\n", espnow_channel);
 	// clean esp now
 	ESP_ERROR_CHECK(esp_now_deinit());
 	// set WiFi channel
@@ -327,91 +389,98 @@ static esp_err_t espnow_init(void) {
 	uint8_t primary = -1;
 	wifi_second_chan_t secondary;
 	ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-	ESP_LOGI(TAG5, "Wifi initialized without problems...\n");
+	if(debug) ESP_LOGI(TAG5, "Wifi initialized without problems...\n");
 	ESP_ERROR_CHECK(esp_wifi_start());
-	ESP_LOGI(TAG5, "Wifi started without problems...\n");
+	if(debug) ESP_LOGI(TAG5, "Wifi started without problems...\n");
 	ESP_ERROR_CHECK(esp_wifi_set_mode(ESPNOW_WIFI_MODE));
-	ESP_LOGI(TAG5, "Wifi set mode STA\n");
+	if(debug) ESP_LOGI(TAG5, "Wifi set mode STA\n");
 	ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
-	ESP_LOGI(TAG5, "Wifi setting promiscuous = true\n");
+	if(debug) ESP_LOGI(TAG5, "Wifi setting promiscuous = true\n");
 	ESP_ERROR_CHECK(esp_wifi_get_channel(&primary, &secondary));
-	ESP_LOGI(TAG5, "Retrieved channel before setting channel: %d\n", primary);
+	if(debug) ESP_LOGI(TAG5, "Retrieved channel before setting channel: %d\n", primary);
 	ESP_ERROR_CHECK(esp_wifi_set_channel(espnow_channel, WIFI_SECOND_CHAN_NONE));
-	ESP_LOGI(TAG5, "Wifi setting channel  = %d\n", espnow_channel);
+	if(debug) ESP_LOGI(TAG5, "Wifi setting channel  = %d\n", espnow_channel);
 	ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
-	ESP_LOGI(TAG5, "Wifi setting promiscuous = false\n");
+	if(debug) ESP_LOGI(TAG5, "Wifi setting promiscuous = false\n");
 	ESP_ERROR_CHECK(esp_wifi_disconnect());
-	ESP_LOGI(TAG5, "Wifi  disconnected\n");
+	if(debug) ESP_LOGI(TAG5, "Wifi  disconnected\n");
 	ESP_ERROR_CHECK(esp_now_init());
-	ESP_LOGI(TAG5, "Wifi esp_now initialized\n");
+	if(debug) ESP_LOGI(TAG5, "Wifi esp_now initialized\n");
 	ESP_ERROR_CHECK(esp_wifi_get_channel(&primary, &secondary));
-	ESP_LOGI(TAG5, "Retrieved channel after setting it : %d\n", primary);
+	if(debug) ESP_LOGI(TAG5, "Retrieved channel after setting it : %d\n", primary);
 
 	ESP_ERROR_CHECK(esp_now_init());
-    ESP_ERROR_CHECK(esp_now_register_send_cb(espnow_send_cb));
-    ESP_ERROR_CHECK(esp_now_register_recv_cb(espnow_recv_cb));
+	ESP_ERROR_CHECK(esp_now_register_send_cb(espnow_send_cb));
+	ESP_ERROR_CHECK(esp_now_register_recv_cb(espnow_recv_cb));
 
 #if CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE
-    ESP_ERROR_CHECK( esp_now_set_wake_window(65535) );
+	ESP_ERROR_CHECK( esp_now_set_wake_window(65535) );
 #endif
-    /* Set primary master key. */
-    /* Add broadcast peer information to peer list. */
-    esp_now_peer_info_t peer;
-    peer.channel = espnow_channel;
-    peer.ifidx = ESPNOW_WIFI_IF;
-    peer.encrypt = false;
-    memcpy(peer.peer_addr, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
-    ESP_ERROR_CHECK( esp_now_add_peer(&peer) );
-    return ESP_OK;
+	/* Set primary master key. */
+	/* Add broadcast peer information to peer list. */
+	esp_now_peer_info_t peer;
+	peer.channel = espnow_channel;
+	peer.ifidx = ESPNOW_WIFI_IF;
+	peer.encrypt = false;
+	memcpy(peer.peer_addr, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
+	ESP_ERROR_CHECK( esp_now_add_peer(&peer) );
+	return ESP_OK;
 }
 
 static void mantener_conexion(void *pvParameter)
-  {
+{
+	while(1)
+	{
+		if(debug) ESP_LOGI(TAG2,"Elapsed time = %f",(float)(esp_timer_get_time()-start_time)/1000);
+		if((esp_timer_get_time()-start_time)/1000 > timeOut && timeOutEnabled )
+		{
+			if(debug) ESP_LOGI(TAG2,"SE PASO EL TIEMPO SIN EMPAREJAR o SIN ENVIAR");
+			if(debug) ESP_LOGI(TAG2,"millis = %lld limite: %ld",esp_timer_get_time(),timeOut);
+			gotoSleep();
+		}
+		switch(pairingStatus) {
+		case PAIR_REQUEST:
+			if(debug) ESP_LOGI(TAG2,"Pairing request on channel %d" , espnow_channel );
 
-  while(1)
-  {
-   switch(pairingStatus) {
-    case PAIR_REQUEST:
-	ESP_LOGI(TAG2,"Pairing request on channel %d" , espnow_channel );
+			espnow_init();
 
-    espnow_init();
+			// set pairing data to send to the server
+			pairingData.msgType = PAIRING;
+			pairingData.id = ESPNOW_DEVICE;
 
-    // set pairing data to send to the server
-    pairingData.msgType = PAIRING;
-    pairingData.id = ESPNOW_DEVICE;
+			// send request
+			esp_now_send(s_example_broadcast_mac, (uint8_t *) &pairingData, sizeof(pairingData));
+			pairingStatus = PAIR_REQUESTED;
+			break;
 
-    // send request
-    esp_now_send(s_example_broadcast_mac, (uint8_t *) &pairingData, sizeof(pairingData));
-    pairingStatus = PAIR_REQUESTED;
-    break;
+		case PAIR_REQUESTED:
+			// time out to allow receiving response from server
+			vTaskDelay(100/portTICK_PERIOD_MS);
+			if(pairingStatus==PAIR_REQUESTED)
+				// time out expired,  try next channel
+			{
+				espnow_channel ++;
+				if (espnow_channel > 11) espnow_channel = 0;
+				pairingStatus = PAIR_REQUEST;
+			}
+			break;
 
-    case PAIR_REQUESTED:
-     // time out to allow receiving response from server
-     vTaskDelay(100/portTICK_PERIOD_MS);
-     if(pairingStatus==PAIR_REQUESTED)
-      // time out expired,  try next channel
-     {
-      espnow_channel ++;
-      if (espnow_channel > 11) espnow_channel = 0;
-      pairingStatus = PAIR_REQUEST;
-     }
-    break;
-
-    case PAIR_PAIRED:
-     vTaskSuspend(NULL);
-    break;
-   }
-  }
+		case PAIR_PAIRED:
+			vTaskSuspend(NULL);
+			break;
+		}
+	}
 }
 
 
 void autopairing_init()
-  {
+{
+	start_time = esp_timer_get_time();
 	wifi_init();
 	semaforo_envio = xSemaphoreCreateBinary();
 	cola_resultado_enviados = xQueueCreate(10, sizeof(espnow_send_cb_t));
 	xTaskCreate(mantener_conexion, "conexion", 2048, NULL, 2, &conexion_hand);
-  }
+}
 
 uint32_t read_adc_avg(struct_adclist *ADC_Raw, int chn)
 {
@@ -469,7 +538,7 @@ void init_adc_dma_mode(){
 
 	struct_adclist *my_reads = malloc(lengthADC1_CHAN*sizeof(struct_adclist));
 	my_reads->num = lengthADC1_CHAN;
-	ESP_LOGI(TAG,"ADC Length = %d",lengthADC1_CHAN);
+	if(debug) ESP_LOGI(TAG,"ADC Length = %d",lengthADC1_CHAN);
 	my_reads->adc_read = (struct_adcread *)malloc(my_reads->num*sizeof(struct_adcread));
 	for(int i=0;i<my_reads->num;i++){
 		my_reads->adc_read[i].AN_i=0;
@@ -499,20 +568,21 @@ void init_adc_dma_mode(){
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
 		while (conv_on) {
+			unsigned long init_time = esp_timer_get_time();
 			ret = adc_continuous_read(handle, result, READ_LEN, &ret_num, 0);
 			if (ret == ESP_OK) {
-				ESP_LOGI(TAG2, "ret is %x, ret_num is %"PRIu32, ret, ret_num);
+				if(debug) ESP_LOGI(TAG2, "ret is %x, ret_num is %"PRIu32, ret, ret_num);
 				for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES) {
 					adc_digi_output_data_t *p = (void*)&result[i];
 					if (check_valid_data(p)) {
 						//Multisampling each channel and take average reading
 						adc_multisampling(my_reads,p);
 
-						ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Raw_value: %x", 1, p->type2.channel, p->type2.data);
-						ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Filtered_value: %lu", 1, p->type2.channel, my_reads->adc_read[0].adc_filtered);
+						if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Raw_value: %x", 1, p->type2.channel, p->type2.data);
+						if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Filtered_value: %lu", 1, p->type2.channel, my_reads->adc_read[0].adc_filtered);
 
 					} else {
-						ESP_LOGI(TAG2, "Invalid data");
+						if(debug) ESP_LOGI(TAG2, "Invalid data");
 					}
 				}
 				/**
@@ -526,14 +596,20 @@ void init_adc_dma_mode(){
 				break;
 			}
 		}
+
 	}
 
 	ESP_ERROR_CHECK(adc_continuous_stop(handle));
 	ESP_ERROR_CHECK(adc_continuous_deinit(handle));
 }
 
+
+
 void app_main(void) {
 	uint8_t resultado;
+	set_debug(true);
+	set_deepSleep(10);
+	set_timeOut(3000,true); // tiempo máximo
 	// Initialize NVS
 	esp_err_t ret = nvs_flash_init();
 	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -541,25 +617,30 @@ void app_main(void) {
 		ret = nvs_flash_init();
 	}
 	ESP_ERROR_CHECK(ret);
+
+	struct timeval now;
+	gettimeofday(&now, NULL);
+	int sleep_time_ms = (now.tv_sec - sleep_enter_time.tv_sec) * 1000 + (now.tv_usec - sleep_enter_time.tv_usec) / 1000;
+
+	autopairing_init();
 	//example_wifi_init();
 	//example_espnow_init();
-	//xTaskCreate(&blinky, "blinky", 1024,NULL,2,NULL );
+	xTaskCreate(&blinky, "blinky", 1024,NULL,4,NULL );
 	//adc_init();
-	//init_adc_dma_mode();
 	/* Configure the peripheral according to the LED type */
 
 	//adc_init(NULL);
 	// xTaskCreate(TaskBlink, "task1", 128, NULL, 1, NULL );
 
-	ESP_LOGI(TAG, "Hello world!!!");
+	if(debug) ESP_LOGI(TAG, "Hello world!!!");
 
-	ESP_LOGI(TAG, "INIT...");
+	if(debug) ESP_LOGI(TAG, "INIT...");
 
-	autopairing_init();
 
-	ESP_LOGI(TAG, "ENVIO 1");
 
-	if((resultado=espnow_send("{\"txt\":\"hola1\"}"))!=ENVIO_OK)
+	if(debug) ESP_LOGI(TAG, "ENVIO 1");
+
+	if((resultado=espnow_send("{\"txt\":\"hola1\"}",DATA))!=ENVIO_OK)
 	{
 		//hubo un error
 		//ver qué pasó y actuar (ir a dormir)?
@@ -568,14 +649,15 @@ void app_main(void) {
 
 	vTaskDelay( 2000 / portTICK_PERIOD_MS );
 
-	ESP_LOGI(TAG, "ENVIO 2");
+	if(debug) ESP_LOGI(TAG, "ENVIO 2");
 
-	if((resultado=espnow_send("{\"txt\":\"hola2\"}"))!=ENVIO_OK)
+	if((resultado=espnow_send("{\"txt\":\"hola2\"}",DATA))!=ENVIO_OK)
 	{
 		//hubo un error
 		//ver qué pasó y actuar (ir a dormir)?
 	}
 
+	if(debug) ESP_LOGI(TAG, "FIN DEL MAIN APP");
 
-	ESP_LOGI(TAG, "FIN DEL MAIN APP");
+	//init_adc_dma_mode();
 }
