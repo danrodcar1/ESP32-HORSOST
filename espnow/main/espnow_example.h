@@ -78,11 +78,7 @@ typedef union {
     example_espnow_event_recv_cb_t recv_cb;
 } example_espnow_event_info_t;
 
-/* When ESPNOW sending or receiving callback function is called, post event to ESPNOW task. */
-typedef struct {
-    example_espnow_event_id_t id;
-    example_espnow_event_info_t info;
-} example_espnow_event_t;
+
 
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
 #define BYTE_TO_BINARY(byte)   \
