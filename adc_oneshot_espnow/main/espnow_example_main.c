@@ -12,20 +12,28 @@
  Prepare two device, one for sending ESPNOW data and another for receiving
  ESPNOW data.
  */
+//------- C HEADERS ----------//
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
+#include <sys/socket.h>
 #include <string.h>
 #include <assert.h>
+//------- ESP32 HEADERS .- FREERTOS ----------//
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
 #include "freertos/task.h"
+//------- ESP32 HEADERS .- GPIO ----------//
 #include "driver/gpio.h"
+//------- ESP32 HEADERS .- FLASH ----------//
+#include "nvs.h"
 #include "nvs_flash.h"
+//------- ESP32 HEADERS .- WIFI & ESPNOW ----------//
+#include "esp_system.h"
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
@@ -33,15 +41,22 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_now.h"
+#include "espnow_example.h"
+#include "AUTOpairing_common.h"
+//------- ESP32 HEADERS .- ONESHOT ADC ----------//
 #include "soc/soc_caps.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
-#include "espnow_example.h"
-#include "esp_adc/adc_continuous.h"
-#include "AUTOpairing_common.h"
+//------- ESP32 HEADERS .- DEEP SLEEP ----------//
 #include "esp_sleep.h"
-
+//------- ESP32 HEADERS .- JSON FORMATTER ----------//
+#include "cJSON.h"
+//------- ESP32 HEADERS .- OTA ----------//
+#include "esp_ota_ops.h"
+#include "esp_http_client.h"
+#include "esp_https_ota.h"
+#include "protocol_examples_common.h"
 
 // DEEP SLEEP VARS
 int wakeup_time_sec;
@@ -117,26 +132,14 @@ bool conv_on;
 #define ADC_OUTPUT_TYPE         ADC_DIGI_OUTPUT_FORMAT_TYPE2
 #define FILTER_LEN  15
 #define ADC_ATTEN           ADC_ATTEN_DB_6
-#define ADC_GET_CHANNEL(p_data)     ((p_data)->type2.channel)
-#define ADC_GET_DATA(p_data)        ((p_data)->type2.data)
 
 static TaskHandle_t s_task_handle;
 //ADC1 Channels
-const int adc_channel[4] = {ADC_CHANNEL_0,ADC_CHANNEL_1,ADC_CHANNEL_2,ADC_CHANNEL_4};
+const int adc_channel[1] = {ADC_CHANNEL_0};
 //static adc_channel_t adc_channel[4] = {ADC_CHANNEL_0,ADC_CHANNEL_1,ADC_CHANNEL_2,ADC_CHANNEL_4};
 uint8_t lengthADC1_CHAN = sizeof(adc_channel) / sizeof(adc_channel_t);
 
 float EMA_ALPHA = 0.6;
-
-//typedef struct{
-//	uint32_t adc_raw; 					/*4 bytes*/
-//	uint32_t adc_filtered;
-//	int voltage;					/*4 bytes*/
-//	uint32_t adc_buff[FILTER_LEN];	/*4 bytes*/
-//	uint32_t sum;						/*4 bytes*/
-//	int AN_i;						/*4 bytes*/
-//	char adc_msg[256];
-//}struct_adcread;
 
 typedef struct{
 	int adc_raw; 					/*4 bytes*/
@@ -144,7 +147,6 @@ typedef struct{
 	uint32_t adc_buff[FILTER_LEN];	/*4 bytes*/
 	int sum;						/*4 bytes*/
 	uint32_t adc_filtered;
-	char adc_msg[256];
 	int AN_i;						/*4 bytes*/
 }struct_adcread;
 
@@ -165,64 +167,109 @@ unsigned long convertion_time = 200;
 unsigned long previous_conv_time = 0;
 unsigned long current_conv_time = 0;
 
+
+#define OTA_URL_SIZE 256
+#define HASH_LEN 32
+#define FIRMWARE_UPGRADE_URL "https://huertociencias.uma.es/esp8266-ota-update"
+
 static uint8_t s_led_state = 0;
 
 // Function prototypes
-static bool example_adc_calibration_init(adc_unit_t unit, adc_atten_t atten, adc_cali_handle_t *out_handle);
-static void example_adc_calibration_deinit(adc_cali_handle_t handle);
+static bool adc_calibration_init(adc_unit_t unit, adc_atten_t atten, adc_cali_handle_t *out_handle);
+static void adc_calibration_deinit(adc_cali_handle_t handle);
 uint8_t espnow_send(char * mensaje, bool fin, uint8_t _msgType);
 
-static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
+esp_err_t _http_event_handler(esp_http_client_event_t *evt)
 {
-	BaseType_t mustYield = pdFALSE;
-	//Notify that ADC continuous driver has done enough number of conversions
-	vTaskNotifyGiveFromISR(s_task_handle, &mustYield);
-
-	return (mustYield == pdTRUE);
+    switch (evt->event_id) {
+    case HTTP_EVENT_ERROR:
+        ESP_LOGD(TAG, "HTTP_EVENT_ERROR");
+        break;
+    case HTTP_EVENT_ON_CONNECTED:
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_CONNECTED");
+        break;
+    case HTTP_EVENT_HEADER_SENT:
+        ESP_LOGD(TAG, "HTTP_EVENT_HEADER_SENT");
+        break;
+    case HTTP_EVENT_ON_HEADER:
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
+        break;
+    case HTTP_EVENT_ON_DATA:
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
+        break;
+    case HTTP_EVENT_ON_FINISH:
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_FINISH");
+        break;
+    case HTTP_EVENT_DISCONNECTED:
+        ESP_LOGD(TAG, "HTTP_EVENT_DISCONNECTED");
+        break;
+    case HTTP_EVENT_REDIRECT:
+        ESP_LOGD(TAG, "HTTP_EVENT_REDIRECT");
+        break;
+    }
+    return ESP_OK;
 }
 
-static void continuous_adc_init(adc_channel_t *channel, uint8_t channel_num, adc_continuous_handle_t *out_handle)
-{
-	adc_continuous_handle_t handle = NULL;
-
-	adc_continuous_handle_cfg_t adc_config = {
-			.max_store_buf_size = 1024,
-			.conv_frame_size = READ_LEN,
-	};
-	ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &handle));
-
-	adc_continuous_config_t dig_cfg = {
-			.sample_freq_hz = 20 * 1000,
-			.conv_mode = ADC_CONV_MODE,
-			.format = ADC_OUTPUT_TYPE,
-	};
-
-	adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
-	dig_cfg.pattern_num = channel_num;
-	for (int i = 0; i < channel_num; i++) {
-		uint8_t unit = ADC_UNIT_1;
-		uint8_t ch = channel[i] & 0x7;
-		adc_pattern[i].atten = ADC_ATTEN;
-		adc_pattern[i].channel = ch;
-		adc_pattern[i].unit = unit;
-		adc_pattern[i].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
-
-		if(debug) ESP_LOGI(TAG, "adc_pattern[%d].atten is :%x", i, adc_pattern[i].atten);
-		if(debug) ESP_LOGI(TAG, "adc_pattern[%d].channel is :%x", i, adc_pattern[i].channel);
-		if(debug) ESP_LOGI(TAG, "adc_pattern[%d].unit is :%x", i, adc_pattern[i].unit);
-	}
-	dig_cfg.adc_pattern = adc_pattern;
-	ESP_ERROR_CHECK(adc_continuous_config(handle, &dig_cfg));
-	*out_handle = handle;
-}
-
-static bool check_valid_data(const adc_digi_output_data_t *data)
-{
-	if (data->type2.channel >= SOC_ADC_CHANNEL_NUM(ADC_UNIT_1)) {
-		return false;
-	}
-	return true;
-}
+//void simple_ota_example_task(void *pvParameter)
+//{
+//    ESP_LOGI(TAG, "Starting OTA example task");
+//#ifdef CONFIG_EXAMPLE_FIRMWARE_UPGRADE_BIND_IF
+//    esp_netif_t *netif = get_example_netif_from_desc(bind_interface_name);
+//    if (netif == NULL) {
+//        ESP_LOGE(TAG, "Can't find netif from interface description");
+//        abort();
+//    }
+//    struct ifreq ifr;
+//    esp_netif_get_netif_impl_name(netif, ifr.ifr_name);
+//    ESP_LOGI(TAG, "Bind interface name is %s", ifr.ifr_name);
+//#endif
+//    esp_http_client_config_t config = {
+//        .url = CONFIG_EXAMPLE_FIRMWARE_UPGRADE_URL,
+//#ifdef CONFIG_EXAMPLE_USE_CERT_BUNDLE
+//        .crt_bundle_attach = esp_crt_bundle_attach,
+//#else
+//        .cert_pem = (char *)server_cert_pem_start,
+//#endif /* CONFIG_EXAMPLE_USE_CERT_BUNDLE */
+//        .event_handler = _http_event_handler,
+//        .keep_alive_enable = true,
+//#ifdef CONFIG_EXAMPLE_FIRMWARE_UPGRADE_BIND_IF
+//        .if_name = &ifr,
+//#endif
+//    };
+//
+//#ifdef CONFIG_EXAMPLE_FIRMWARE_UPGRADE_URL_FROM_STDIN
+//    char url_buf[OTA_URL_SIZE];
+//    if (strcmp(config.url, "FROM_STDIN") == 0) {
+//        example_configure_stdin_stdout();
+//        fgets(url_buf, OTA_URL_SIZE, stdin);
+//        int len = strlen(url_buf);
+//        url_buf[len - 1] = '\0';
+//        config.url = url_buf;
+//    } else {
+//        ESP_LOGE(TAG, "Configuration mismatch: wrong firmware upgrade image url");
+//        abort();
+//    }
+//#endif
+//
+//#ifdef CONFIG_EXAMPLE_SKIP_COMMON_NAME_CHECK
+//    config.skip_cert_common_name_check = true;
+//#endif
+//
+//    esp_https_ota_config_t ota_config = {
+//        .http_config = &config,
+//    };
+//    ESP_LOGI(TAG, "Attempting to download update from %s", config.url);
+//    esp_err_t ret = esp_https_ota(&ota_config);
+//    if (ret == ESP_OK) {
+//        ESP_LOGI(TAG, "OTA Succeed, Rebooting...");
+//        esp_restart();
+//    } else {
+//        ESP_LOGE(TAG, "Firmware upgrade failed");
+//    }
+//    while (1) {
+//        vTaskDelay(1000 / portTICK_PERIOD_MS);
+//    }
+//}
 
 void blinky(void *pvParameter)
 {
@@ -368,6 +415,24 @@ static void espnow_send_cb(const uint8_t *mac_addr,	esp_now_send_status_t status
 	if(xQueueSend(cola_resultado_enviados,&resultado, ESPNOW_MAXDELAY) != pdTRUE)ESP_LOGW(TAG, "Send send queue fail");
 }
 
+static esp_err_t mqtt_process_msg(struct_espnow_rcv_msg *my_msg){
+	if(debug) ESP_LOGI(TAG8, "topic: %s", my_msg->topic);
+	cJSON *root2 = cJSON_Parse(my_msg->payload);
+	if(strcmp (my_msg->topic,"config") == 0){
+		if(debug) ESP_LOGI(TAG8, "payload: %s", my_msg->payload);
+		if(debug) ESP_LOGI(TAG8, "Deserialize payload.....");
+		int tsleep = cJSON_GetObjectItem(root2,"sleep")->valueint;
+		int tout = cJSON_GetObjectItem(root2,"timeout")->valueint;
+		if(debug) ESP_LOGI(TAG8, "tsleep = %d",tsleep);
+		if(debug) ESP_LOGI(TAG8, "tout = %d",tout);
+	}
+
+	free(my_msg->topic);
+	free(my_msg->payload);
+	cJSON_Delete(root2);
+	return ESP_OK;
+}
+
 static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len) {
 	uint8_t * mac_addr = recv_info->src_addr;
 	uint8_t type = data[0];
@@ -395,10 +460,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
 		my_msg->payload = malloc(len - i - 1);
 		snprintf(my_msg->topic, i, "%s", (char*)data + 1);
 		snprintf(my_msg->payload, len - i, "%s", (char*)data + i + 1);
-		if(debug) ESP_LOGI(TAG8, "topic: %s", my_msg->topic);
-		if(debug) ESP_LOGI(TAG8, "payload: %s", my_msg->payload);
-		free(my_msg->topic);
-		free(my_msg->payload);
+		mqtt_process_msg(my_msg);
 		break;
 	case PAIRING:
 		if(debug) ESP_LOGI(TAG8, "canal: %d", punt->channel);
@@ -591,29 +653,6 @@ uint32_t read_adc_avg(struct_adclist *ADC_Raw, int chn)
 	return (buf[chn].sum/FILTER_LEN);
 }
 
-void adc_multisampling(struct_adclist *my_reads,adc_digi_output_data_t *p){
-	switch ( p->type2.channel )
-	{
-	case 0:
-		my_reads->adc_read[0].adc_raw=p->type2.data;
-		my_reads->adc_read[0].adc_filtered = EMA_ALPHA * my_reads->adc_read[0].adc_raw + (1 - EMA_ALPHA) * my_reads->adc_read[0].adc_filtered;
-		//my_reads->adc_read[0].adc_filtered=read_adc_avg(my_reads,0);
-		break;
-	case 1:
-		my_reads->adc_read[1].adc_raw=p->type2.data;
-		my_reads->adc_read[1].adc_filtered = EMA_ALPHA * my_reads->adc_read[0].adc_raw + (1 - EMA_ALPHA) * my_reads->adc_read[1].adc_filtered;
-		break;
-	case 2:
-		my_reads->adc_read[2].adc_raw=p->type2.data;
-		my_reads->adc_read[2].adc_filtered = EMA_ALPHA * my_reads->adc_read[0].adc_raw + (1 - EMA_ALPHA) * my_reads->adc_read[2].adc_filtered;
-		break;
-	case 4:
-		my_reads->adc_read[3].adc_raw=p->type2.data;
-		my_reads->adc_read[3].adc_filtered = EMA_ALPHA * my_reads->adc_read[0].adc_raw + (1 - EMA_ALPHA) * my_reads->adc_read[3].adc_filtered;
-		//my_reads->adc_read[3].adc_filtered=read_adc_avg(my_reads,3);
-		break;
-	}
-}
 
 uint32_t get_adc_filtered_read(struct_adclist *my_reads, int adc_ch){
 	return my_reads->adc_read[adc_ch].adc_filtered;
@@ -624,106 +663,6 @@ uint32_t get_adc_raw_read(struct_adclist *my_reads, int adc_ch){
 uint32_t get_adc_voltage_read(struct_adclist *my_reads, int adc_ch){
 	return my_reads->adc_read[adc_ch].voltage;
 }
-//void init_adc_dma_mode(struct_adclist *my_reads){
-//	esp_err_t ret;
-//	uint32_t ret_num = 0;
-//	uint8_t result[READ_LEN] = {0};
-//    uint32_t finalBufferSize = 600;
-//    uint16_t numSamples = 0;
-//	memset(result, 0xcc, READ_LEN);
-//
-//	s_task_handle = xTaskGetCurrentTaskHandle();
-//
-//	adc_continuous_handle_t handle = NULL;
-//
-//
-//	continuous_adc_init(adc_channel, lengthADC1_CHAN, &handle);
-//
-//
-//	//gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-//
-//	//gpio_set_level(BLINK_GPIO, 1);
-//
-//	adc_continuous_evt_cbs_t cbs = {
-//			.on_conv_done = s_conv_done_cb,
-//	};
-//	ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(handle, &cbs, NULL));
-//	ESP_ERROR_CHECK(adc_continuous_start(handle));
-//
-//
-//	unsigned long endwait = convertion_time + (esp_timer_get_time()/1000);
-//
-//
-//	while(1 && numSamples < finalBufferSize){
-//		/**
-//		 * This is to show you the way to use the ADC continuous mode driver event callback.
-//		 * This `ulTaskNotifyTake` will block when the data processing in the task is fast.
-//		 * However in this example, the data processing (print) is slow, so you barely block here.
-//		 *
-//		 * Without using this event callback (to notify this task), you can still just call
-//		 * `adc_continuous_read()` here in a loop, with/without a certain block timeout.
-//		 */
-//		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-//
-//		while (1) {//(esp_timer_get_time()/1000) < endwait
-//			if(debug) ESP_LOGI(TAG2, "INIT CONVERTION");
-//
-//			gpio_set_level(TRIGGER_ADC_PIN, 1);
-//			gpio_set_level(BLINK_GPIO, 1);
-//
-//			ret = adc_continuous_read(handle, result, READ_LEN, &ret_num, 0);
-//			if (ret == ESP_OK) {
-//				//if(debug) ESP_LOGI(TAG2, "ret is %x, ret_num is %"PRIu32, ret, ret_num);
-//				for (int i = 0; i < ret_num; i += SOC_ADC_DIGI_RESULT_BYTES) {
-//					adc_digi_output_data_t *p = (void*)&result[i];
-//					uint32_t chan_num = ADC_GET_CHANNEL(p);
-//					uint32_t data = ADC_GET_DATA(p);
-//					if (check_valid_data(p)) {
-//						//Multisampling each channel and take average reading
-//						adc_multisampling(my_reads,p);
-//						numSamples++;
-//						if(debug) ESP_LOGI(TAG2, "numSamples = %d",numSamples);
-//
-//						if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Raw_value: %lu", 1, 0, my_reads->adc_read[0].adc_raw);
-//						if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Filtered_value: %lu", 1, 0, my_reads->adc_read[0].adc_filtered);
-//						//if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Filtered_value_function: %lu", 1, 0, get_adc_filtered_read(my_reads,0));
-//						//					if((current_conv_time - previous_conv_time)/1000 >= convertion_time){
-//						//						if(debug) ESP_LOGI(TAG2,"Elapsed time = %lu", (current_conv_time - previous_conv_time)/1000);
-//						//						//							if(debug) ESP_LOGI(TAG2,"Envio disponible = %d", envio_disponible());
-//						//						//							//get_adc_raw_read(my_reads,0);
-//						//						//							sprintf(my_reads->adc_read[0].adc_msg,"{\"adc_filtered\":\"%lu\"}", my_reads->adc_read[0].adc_filtered);
-//						//						//							espnow_send_check(my_reads->adc_read[0].adc_msg, true, DATA); // hará deepsleep por defecto
-//						//						////							if((espnow_send(my_reads->adc_read[0].adc_msg,true, DATA))!=ENVIO_OK)
-//						//						////							{
-//						//						////								//hubo un error
-//						//						////								//ver qué pasó y actuar (ir a dormir)?
-//						//						////							}
-//						//						//
-//						//						previous_conv_time = current_conv_time;
-//						//						//							if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Filtered_value: %lu", 1, 0, my_reads->adc_read[0].adc_filtered);
-//						//
-//						//					}
-//					} else {
-//						if(debug) ESP_LOGI(TAG2, "Invalid data");
-//					}
-//				}
-//				/**
-//				 * Because printing is slow, so every time you call `ulTaskNotifyTake`, it will immediately return.
-//				 * To avoid a task watchdog timeout, add a delay here. When you replace the way you process the data,
-//				 * usually you don't need this delay (as this task will block for a while).
-//				 */
-//				vTaskDelay(1);
-//			} else if (ret == ESP_ERR_TIMEOUT) {
-//				//We try to read `EXAMPLE_READ_LEN` until API returns timeout, which means there's no available data
-//				break;
-//			}
-//		}
-//	}
-//	//gpio_set_level(BLINK_GPIO, 0);
-//	ESP_ERROR_CHECK(adc_continuous_stop(handle));
-//	ESP_ERROR_CHECK(adc_continuous_deinit(handle));
-//}
-
 
 
 static esp_err_t adc_init(struct_adclist *my_reads){
@@ -747,21 +686,21 @@ static esp_err_t adc_init(struct_adclist *my_reads){
 		ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, adc_channel[i], &config));
 	}
 	//-------------ADC1 Calibration Init---------------//
-	do_calibration = example_adc_calibration_init(ADC_UNIT_1, ADC_ATTEN, &adc1_cali_handle);
+	do_calibration = adc_calibration_init(ADC_UNIT_1, ADC_ATTEN, &adc1_cali_handle);
 
 
 	unsigned long endwait = convertion_time*lengthADC1_CHAN + (esp_timer_get_time()/1000);
 
-	while ((esp_timer_get_time()/1000) < endwait) {
+	while ((esp_timer_get_time()/1000) < endwait) {//
 		gpio_set_level(TRIGGER_ADC_PIN, 1);
 		gpio_set_level(BLINK_GPIO, 1);
 		for(int i=0;i<my_reads->num;i++){
 			ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, adc_channel[i], &my_reads->adc_read[i].adc_raw));
-			ESP_LOGI(TAG2, "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, adc_channel[i], my_reads->adc_read[i].adc_raw);
+			if(debug) ESP_LOGI(TAG2, "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, adc_channel[i], my_reads->adc_read[i].adc_raw);
 			if (do_calibration) {
 				my_reads->adc_read[i].adc_filtered = read_adc_avg(my_reads,i);
 				ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_handle, read_adc_avg(my_reads,i), &my_reads->adc_read[i].voltage));
-				ESP_LOGI(TAG2, "ADC%d Channel[%d] Cali Voltage: %d mV", ADC_UNIT_1 + 1, adc_channel[i], my_reads->adc_read[i].voltage);
+				if(debug) ESP_LOGI(TAG2, "ADC%d Channel[%d] Cali Voltage: %d mV", ADC_UNIT_1 + 1, adc_channel[i], my_reads->adc_read[i].voltage);
 			}
 		}
 		vTaskDelay(pdMS_TO_TICKS(10));
@@ -771,13 +710,15 @@ static esp_err_t adc_init(struct_adclist *my_reads){
 	gpio_set_level(BLINK_GPIO, 0);
 	ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
 	if (do_calibration) {
-		example_adc_calibration_deinit(adc1_cali_handle);
+		adc_calibration_deinit(adc1_cali_handle);
 	}
 	return ESP_OK;
 }
 
 void app_main(void) {
 	uint8_t resultado;
+	cJSON *root, *fmt;
+	char tag[25];
 
 	struct_adclist *my_reads = malloc(lengthADC1_CHAN*sizeof(struct_adclist));
 	my_reads->num = lengthADC1_CHAN;
@@ -807,27 +748,38 @@ void app_main(void) {
 	gettimeofday(&now, NULL);
 	int sleep_time_ms = (now.tv_sec - sleep_enter_time.tv_sec) * 1000 + (now.tv_usec - sleep_enter_time.tv_usec) / 1000;
 
-	//xTaskCreate(&blinky, "blinky", 2048,NULL,4,NULL );
 	autopairing_init();
 
-	vTaskDelay( 1500 / portTICK_PERIOD_MS );
-	if(envio_disponible()){
-		adc_init(my_reads);
-		if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Filtered_value: %lu", 1, 0, get_adc_filtered_read(my_reads,0));
-		if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Raw_value: %lu", 1, 0,get_adc_raw_read(my_reads,0));
-		if(debug) ESP_LOGI(TAG2, "Unit: %d,_Channel: %d, Voltage: %lu", 1, 0,get_adc_voltage_read(my_reads,0));
-		sprintf(my_reads->adc_read[0].adc_msg,"{\"adc_filtered\":\"%lu\"}", get_adc_filtered_read(my_reads,0));
-		espnow_send_check(my_reads->adc_read[0].adc_msg, true, DATA); // hará deepsleep por defecto
-		free(my_reads);
-		ESP_LOGI(TAG, "FIN DEL MAIN APP");
+	while(1){
+		if(envio_disponible()){
+			adc_init(my_reads);
+			root = cJSON_CreateObject();
+
+			for(int i=0;i<my_reads->num;i++){
+				if(debug) ESP_LOGI(TAG, "Serialize readings of channel %d",i);
+				sprintf(tag,"Sensor%d", i);
+				cJSON_AddItemToObject(root, tag, fmt=cJSON_CreateObject());
+				cJSON_AddNumberToObject(fmt, "adc_voltage", get_adc_voltage_read(my_reads,i));
+			}
+
+			char *my_json_string = cJSON_Print(root);
+			if(debug) ESP_LOGI(TAG, "my_json_string\n%s",my_json_string);
+			espnow_send_check(my_json_string, true, DATA); // hará deepsleep por defecto
+			free(my_reads);
+			cJSON_Delete(root);
+			cJSON_free(my_json_string);
+			break;
+		}
+		vTaskDelay(1);
 	}
+	ESP_LOGI(TAG, "FIN DEL MAIN APP");
 }
 
 
 /*---------------------------------------------------------------
         ADC Calibration
 ---------------------------------------------------------------*/
-static bool example_adc_calibration_init(adc_unit_t unit, adc_atten_t atten, adc_cali_handle_t *out_handle)
+static bool adc_calibration_init(adc_unit_t unit, adc_atten_t atten, adc_cali_handle_t *out_handle)
 {
     adc_cali_handle_t handle = NULL;
     esp_err_t ret = ESP_FAIL;
@@ -858,7 +810,7 @@ static bool example_adc_calibration_init(adc_unit_t unit, adc_atten_t atten, adc
     return calibrated;
 }
 
-static void example_adc_calibration_deinit(adc_cali_handle_t handle)
+static void adc_calibration_deinit(adc_cali_handle_t handle)
 {
     ESP_LOGI(TAG2, "deregister %s calibration scheme", "Curve Fitting");
     ESP_ERROR_CHECK(adc_cali_delete_scheme_curve_fitting(handle));
