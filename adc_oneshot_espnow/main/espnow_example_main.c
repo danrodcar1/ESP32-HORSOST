@@ -16,7 +16,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include <string.h>
 #include <time.h>
 #include <sys/time.h>
 #include <sys/socket.h>
@@ -27,6 +26,7 @@
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 //------- ESP32 HEADERS .- GPIO ----------//
 #include "driver/gpio.h"
 //------- ESP32 HEADERS .- FLASH ----------//
@@ -41,6 +41,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_now.h"
+#include "esp_efuse.h" // CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK
 #include "espnow_example.h"
 #include "AUTOpairing_common.h"
 //------- ESP32 HEADERS .- ONESHOT ADC ----------//
@@ -59,30 +60,30 @@
 #include "protocol_examples_common.h"
 
 // DEEP SLEEP VARS
-int wakeup_time_sec;
+int wakeup_time_sec = 10;
 int mensajes_sent = 0;
 int panAddress = 1;
+int config_size = 0;
 bool esperando = false;
 bool terminar = false;
 bool mensaje_enviado = false;
 bool debug = false;
-unsigned long timeOut;
+bool nvs_enable = true;
+uint16_t timeOut = 3000;
 unsigned long start_time;
-bool timeOutEnabled;
+bool timeOutEnabled = false;
 
 static RTC_DATA_ATTR struct timeval sleep_enter_time;
 
-#define CANAL 6
 
 static int espnow_channel = CANAL;
 
-#define ESPNOW_MAXDELAY 512
+#define ESP_WIFI_SAE_MODE WPA3_SAE_PWE_HUNT_AND_PECK
+#define H2E_IDENTIFIER CONFIG_ESP_WIFI_PW_ID
 
-#define ERROR_NOT_PAIRED    1
-#define ERROR_MSG_TOO_LARGE 2
-#define ERROR_SIN_RESPUESTA 3
-#define ERROR_ENVIO_ESPNOW  4
-#define ENVIO_OK            0
+
+#define ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD WIFI_AUTH_OPEN
+
 
 TaskHandle_t adcTaskHandle = NULL;
 adc_oneshot_unit_handle_t adc1_handle;
@@ -93,27 +94,31 @@ static const char *TAG  = "* mainApp";
 static const char *TAG2 = "* adc_reads";
 static const char *TAG3 = "* task conexion";
 static const char *TAG4 = "* funcion envio";
-static const char *TAG8 = "* funcion recivo";
 static const char *TAG5 = "* init espnow";
 static const char *TAG6 = "* callbacks espnow";
 static const char *TAG7 = "* deep sleep";
+static const char *TAG8 = "* funcion recivo";
+static const char *TAG9 = "* advanced https ota";
+static const char *TAG10 = "* wifi station";
+static const char *TAG11 = "* nvs init";
 
 static QueueHandle_t cola_resultado_enviados;
 static SemaphoreHandle_t semaforo_envio;
 
-typedef struct {
-	uint8_t mac_addr[ESP_NOW_ETH_ALEN];
-	esp_now_send_status_t status;
-} espnow_send_cb_t;
+/* FreeRTOS event group to signal when we are connected*/
+static EventGroupHandle_t s_wifi_event_group;
+
+
+
+static int s_retry_num = 0;
 
 PairingStatus pairingStatus=PAIR_REQUEST;
-struct struct_pairing pairingData;
 
 TaskHandle_t conexion_hand = NULL;
 
-struct struct_pairing pairingData;
-
-static QueueHandle_t s_example_espnow_queue;
+struct_pairing pairingData;
+struct_config rtcConfig;
+struct_rtc rtcData;
 
 static uint8_t s_example_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
@@ -122,18 +127,8 @@ uint8_t mac_address[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
 
 bool conv_on;
 
-#define BLINK_GPIO 10
-#define TRIGGER_ADC_PIN 6
-/*---------------------------------------------------------------
-        ADC General Macros
----------------------------------------------------------------*/
-#define READ_LEN   256
-#define ADC_CONV_MODE           ADC_CONV_SINGLE_UNIT_1
-#define ADC_OUTPUT_TYPE         ADC_DIGI_OUTPUT_FORMAT_TYPE2
-#define FILTER_LEN  15
-#define ADC_ATTEN           ADC_ATTEN_DB_6
 
-static TaskHandle_t s_task_handle;
+
 //ADC1 Channels
 const int adc_channel[1] = {ADC_CHANNEL_0};
 //static adc_channel_t adc_channel[4] = {ADC_CHANNEL_0,ADC_CHANNEL_1,ADC_CHANNEL_2,ADC_CHANNEL_4};
@@ -141,157 +136,279 @@ uint8_t lengthADC1_CHAN = sizeof(adc_channel) / sizeof(adc_channel_t);
 
 float EMA_ALPHA = 0.6;
 
-typedef struct{
-	int adc_raw; 					/*4 bytes*/
-	int voltage;					/*4 bytes*/
-	uint32_t adc_buff[FILTER_LEN];	/*4 bytes*/
-	int sum;						/*4 bytes*/
-	uint32_t adc_filtered;
-	int AN_i;						/*4 bytes*/
-}struct_adcread;
 
-typedef struct{
-	char *topic;
-	char *payload;
-	uint8_t macAddr[6];
-}struct_espnow_rcv_msg;
-
-typedef struct{
-	int num;
-	struct_adcread *adc_read;
-}struct_adclist;
-//static_assert(sizeof(struct_adclist) == 8);
+extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
+extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
 
 
 unsigned long convertion_time = 200;
-unsigned long previous_conv_time = 0;
-unsigned long current_conv_time = 0;
 
-
-#define OTA_URL_SIZE 256
-#define HASH_LEN 32
-#define FIRMWARE_UPGRADE_URL "https://huertociencias.uma.es/esp8266-ota-update"
-
-static uint8_t s_led_state = 0;
 
 // Function prototypes
 static bool adc_calibration_init(adc_unit_t unit, adc_atten_t atten, adc_cali_handle_t *out_handle);
 static void adc_calibration_deinit(adc_cali_handle_t handle);
 uint8_t espnow_send(char * mensaje, bool fin, uint8_t _msgType);
+uint8_t set_nvs_config();
+void get_nvs_config();
 
-esp_err_t _http_event_handler(esp_http_client_event_t *evt)
+static void wifi_event_handler(void* arg, esp_event_base_t event_base,
+                                int32_t event_id, void* event_data)
 {
-    switch (evt->event_id) {
-    case HTTP_EVENT_ERROR:
-        ESP_LOGD(TAG, "HTTP_EVENT_ERROR");
-        break;
-    case HTTP_EVENT_ON_CONNECTED:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_CONNECTED");
-        break;
-    case HTTP_EVENT_HEADER_SENT:
-        ESP_LOGD(TAG, "HTTP_EVENT_HEADER_SENT");
-        break;
-    case HTTP_EVENT_ON_HEADER:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
-        break;
-    case HTTP_EVENT_ON_DATA:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
-        break;
-    case HTTP_EVENT_ON_FINISH:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_FINISH");
-        break;
-    case HTTP_EVENT_DISCONNECTED:
-        ESP_LOGD(TAG, "HTTP_EVENT_DISCONNECTED");
-        break;
-    case HTTP_EVENT_REDIRECT:
-        ESP_LOGD(TAG, "HTTP_EVENT_REDIRECT");
-        break;
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (s_retry_num < ESP_MAXIMUM_RETRY) {
+            esp_wifi_connect();
+            s_retry_num++;
+            ESP_LOGI(TAG, "retry to connect to the AP");
+        } else {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        }
+        ESP_LOGI(TAG,"connect to the AP fail");
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+        s_retry_num = 0;
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    }
+}
+/* Event handler for catching system events */
+static void ota_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
+{
+    if (event_base == ESP_HTTPS_OTA_EVENT) {
+        switch (event_id) {
+            case ESP_HTTPS_OTA_START:
+                ESP_LOGI(TAG9, "OTA started");
+                break;
+            case ESP_HTTPS_OTA_CONNECTED:
+                ESP_LOGI(TAG9, "Connected to server");
+                break;
+            case ESP_HTTPS_OTA_GET_IMG_DESC:
+                ESP_LOGI(TAG9, "Reading Image Description");
+                break;
+            case ESP_HTTPS_OTA_VERIFY_CHIP_ID:
+                ESP_LOGI(TAG9, "Verifying chip id of new image: %d", *(esp_chip_id_t *)event_data);
+                break;
+            case ESP_HTTPS_OTA_DECRYPT_CB:
+                ESP_LOGI(TAG9, "Callback to decrypt function");
+                break;
+            case ESP_HTTPS_OTA_WRITE_FLASH:
+                ESP_LOGD(TAG9, "Writing to flash: %d written", *(int *)event_data);
+                break;
+            case ESP_HTTPS_OTA_UPDATE_BOOT_PARTITION:
+                ESP_LOGI(TAG9, "Boot partition updated. Next Partition: %d", *(esp_partition_subtype_t *)event_data);
+                break;
+            case ESP_HTTPS_OTA_FINISH:
+                ESP_LOGI(TAG9, "OTA finish");
+                break;
+            case ESP_HTTPS_OTA_ABORT:
+                ESP_LOGI(TAG9, "OTA abort");
+                break;
+        }
+    }
+}
+
+void wifi_init_sta(void)
+{
+
+    s_wifi_event_group = xEventGroupCreate();
+
+    ESP_ERROR_CHECK(esp_netif_init());
+
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_ERROR_CHECK(esp_event_handler_register(ESP_HTTPS_OTA_EVENT, ESP_EVENT_ANY_ID, &ota_event_handler, NULL));
+    esp_netif_create_default_wifi_sta();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    esp_event_handler_instance_t instance_any_id;
+    esp_event_handler_instance_t instance_got_ip;
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &instance_any_id));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &instance_got_ip));
+
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = ESP_WIFI_SSID,
+            .password = ESP_WIFI_PASS,
+            /* Authmode threshold resets to WPA2 as default if password matches WPA2 standards (pasword len => 8).
+             * If you want to connect the device to deprecated WEP/WPA networks, Please set the threshold value
+             * to WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK and set the password with length and format matching to
+             * WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK standards.
+             */
+            .threshold.authmode = ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD,
+            .sae_pwe_h2e = ESP_WIFI_SAE_MODE,
+        },
+    };
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
+    ESP_ERROR_CHECK(esp_wifi_start() );
+
+    ESP_LOGI(TAG, "wifi_init_sta finished.");
+
+    /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
+     * number of re-tries (WIFI_FAIL_BIT). The bits are set by wifi_event_handler() (see above) */
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+            pdFALSE,
+            pdFALSE,
+            portMAX_DELAY);
+
+    /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
+     * happened. */
+    if (bits & WIFI_CONNECTED_BIT) {
+        ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
+                 ESP_WIFI_SSID, ESP_WIFI_PASS);
+    } else if (bits & WIFI_FAIL_BIT) {
+        ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
+                 ESP_WIFI_SSID, ESP_WIFI_PASS);
+    } else {
+        ESP_LOGE(TAG, "UNEXPECTED EVENT");
+    }
+}
+
+
+
+
+static esp_err_t validate_image_header(esp_app_desc_t *new_app_info)
+{
+    if (new_app_info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_app_desc_t running_app_info;
+    if (esp_ota_get_partition_description(running, &running_app_info) == ESP_OK) {
+        ESP_LOGI(TAG9, "Running firmware version: %s", running_app_info.version);
+        vTaskDelay(20 / portTICK_PERIOD_MS);
+    }
+
+    if (memcmp(new_app_info->version, running_app_info.version, sizeof(new_app_info->version)) == 0) {
+        ESP_LOGW(TAG9, "Current running version is the same as a new. We will not continue the update.");
+        return ESP_FAIL;
+    }
+    /**
+     * Secure version check from firmware image header prevents subsequent download and flash write of
+     * entire firmware image. However this is optional because it is also taken care in API
+     * esp_https_ota_finish at the end of OTA update procedure.
+     */
+    const uint32_t hw_sec_version = esp_efuse_read_secure_version();
+    if (new_app_info->secure_version < hw_sec_version) {
+        ESP_LOGW(TAG9, "New firmware security version is less than eFuse programmed, %"PRIu32" < %"PRIu32, new_app_info->secure_version, hw_sec_version);
+        return ESP_FAIL;
     }
     return ESP_OK;
 }
 
-//void simple_ota_example_task(void *pvParameter)
-//{
-//    ESP_LOGI(TAG, "Starting OTA example task");
-//#ifdef CONFIG_EXAMPLE_FIRMWARE_UPGRADE_BIND_IF
-//    esp_netif_t *netif = get_example_netif_from_desc(bind_interface_name);
-//    if (netif == NULL) {
-//        ESP_LOGE(TAG, "Can't find netif from interface description");
-//        abort();
-//    }
-//    struct ifreq ifr;
-//    esp_netif_get_netif_impl_name(netif, ifr.ifr_name);
-//    ESP_LOGI(TAG, "Bind interface name is %s", ifr.ifr_name);
-//#endif
-//    esp_http_client_config_t config = {
-//        .url = CONFIG_EXAMPLE_FIRMWARE_UPGRADE_URL,
-//#ifdef CONFIG_EXAMPLE_USE_CERT_BUNDLE
-//        .crt_bundle_attach = esp_crt_bundle_attach,
-//#else
-//        .cert_pem = (char *)server_cert_pem_start,
-//#endif /* CONFIG_EXAMPLE_USE_CERT_BUNDLE */
-//        .event_handler = _http_event_handler,
-//        .keep_alive_enable = true,
-//#ifdef CONFIG_EXAMPLE_FIRMWARE_UPGRADE_BIND_IF
-//        .if_name = &ifr,
-//#endif
-//    };
-//
-//#ifdef CONFIG_EXAMPLE_FIRMWARE_UPGRADE_URL_FROM_STDIN
-//    char url_buf[OTA_URL_SIZE];
-//    if (strcmp(config.url, "FROM_STDIN") == 0) {
-//        example_configure_stdin_stdout();
-//        fgets(url_buf, OTA_URL_SIZE, stdin);
-//        int len = strlen(url_buf);
-//        url_buf[len - 1] = '\0';
-//        config.url = url_buf;
-//    } else {
-//        ESP_LOGE(TAG, "Configuration mismatch: wrong firmware upgrade image url");
-//        abort();
-//    }
-//#endif
-//
-//#ifdef CONFIG_EXAMPLE_SKIP_COMMON_NAME_CHECK
-//    config.skip_cert_common_name_check = true;
-//#endif
-//
-//    esp_https_ota_config_t ota_config = {
-//        .http_config = &config,
-//    };
-//    ESP_LOGI(TAG, "Attempting to download update from %s", config.url);
-//    esp_err_t ret = esp_https_ota(&ota_config);
-//    if (ret == ESP_OK) {
-//        ESP_LOGI(TAG, "OTA Succeed, Rebooting...");
-//        esp_restart();
-//    } else {
-//        ESP_LOGE(TAG, "Firmware upgrade failed");
-//    }
-//    while (1) {
-//        vTaskDelay(1000 / portTICK_PERIOD_MS);
-//    }
-//}
 
-void blinky(void *pvParameter)
+static esp_err_t _http_client_init_cb(esp_http_client_handle_t http_client)
 {
-	gpio_reset_pin(TRIGGER_ADC_PIN);
-	gpio_reset_pin(BLINK_GPIO);
-
-	/* Set the GPIO as a push/pull output */
-	gpio_set_direction(TRIGGER_ADC_PIN, GPIO_MODE_OUTPUT);
-	gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-	while(1) {
-		/* Blink off (output low) */
-		gpio_set_level(TRIGGER_ADC_PIN, 0);
-		gpio_set_level(BLINK_GPIO, 0);
-		conv_on = false;
-		vTaskDelay(convertion_time / portTICK_PERIOD_MS);
-		/* Blink on (output high) */
-		gpio_set_level(TRIGGER_ADC_PIN, 1);
-		gpio_set_level(BLINK_GPIO, 1);
-		conv_on = true;
-		vTaskDelay(convertion_time / portTICK_PERIOD_MS);
-	}
+    esp_err_t err = ESP_OK;
+    uint8_t mac[ESP_NOW_ETH_ALEN];
+    /* Uncomment to add custom headers to HTTP request */
+     err = esp_http_client_set_header(http_client, "Cache-Control", "no-cache");
+//         esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
+//     err = esp_http_client_set_header(http_client, "x-ESP32-STA-MAC", mac);
+//         esp_wifi_get_mac(ESP_IF_WIFI_AP, mac);
+//     err = esp_http_client_set_header(http_client, "x-ESP32-AP-MAC", mac);
+//     err = esp_http_client_set_header(http_client, "x-ESP32-free-space", "Value");
+//     err = esp_http_client_set_header(http_client, "x-ESP32-sketch-size", "Value");
+//     err = esp_http_client_set_header(http_client, "x-ESP32-sketch-md5", "Value");
+//     err = esp_http_client_set_header(http_client, "x-ESP32-sketch-sha256", "Value");
+//     err = esp_http_client_set_header(http_client, "x-ESP32-chip-size", "Value");
+//     err = esp_http_client_set_header(http_client, "x-ESP32-sdk-version", "Value");
+//     err = esp_http_client_set_header(http_client, "x-ESP32-mode", "spiffs");
+//     http.addHeader("x-ESP32-chip-size", String(ESP.getFlashChipSize()));
+//     http.addHeader("x-ESP32-sdk-version", ESP.getSdkVersion());
+//         http.addHeader("x-ESP32-free-space", String(ESP.getFreeSketchSpace()));
+//         http.addHeader("x-ESP32-sketch-size", String(ESP.getSketchSize()));
+//         http.addHeader("x-ESP32-mode", "spiffs");
+//         String sketchMD5 = ESP.getSketchMD5();
+//         if(sketchMD5.length() != 0) {
+//             http.addHeader("x-ESP32-sketch-md5", sketchMD5);
+//         }
+    return err;
 }
+
+void advanced_ota_example_task(void *pvParameter)
+{
+    ESP_LOGI(TAG9, "Starting Advanced OTA example");
+    vTaskDelay(20 / portTICK_PERIOD_MS);
+    esp_err_t ota_finish_err = ESP_OK;
+    esp_http_client_config_t config = {
+    		.url = FIRMWARE_UPGRADE_URL,
+//			.port = 443,
+//			.username = "daniel",
+//			.password = "huertica2022d4n13l",
+			//.cert_pem = (char *)"",
+//			.skip_cert_common_name_check = true,
+
+			.timeout_ms = OTA_RECV_TIMEOUT,
+			.keep_alive_enable = true,
+    };
+
+
+    esp_https_ota_config_t ota_config = {
+        .http_config = &config,
+        .http_client_init_cb = _http_client_init_cb, // Register a callback to be invoked after esp_http_client is initialized
+//        .partial_http_download = true,
+//        .max_http_request_size = HTTP_REQUEST_SIZE,
+    };
+
+    esp_https_ota_handle_t https_ota_handle = NULL;
+    esp_err_t err = esp_https_ota_begin(&ota_config, &https_ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG9, "ESP HTTPS OTA Begin failed");
+        vTaskDelete(NULL);
+    }
+
+    esp_app_desc_t app_desc;
+    err = esp_https_ota_get_img_desc(https_ota_handle, &app_desc);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG9, "esp_https_ota_read_img_desc failed");
+        goto ota_end;
+    }
+    err = validate_image_header(&app_desc);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG9, "image header verification failed");
+        goto ota_end;
+    }
+
+    while (1) {
+        err = esp_https_ota_perform(https_ota_handle);
+        if (err != ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
+            break;
+        }
+        // esp_https_ota_perform returns after every read operation which gives user the ability to
+        // monitor the status of OTA upgrade by calling esp_https_ota_get_image_len_read, which gives length of image
+        // data read so far.
+        ESP_LOGD(TAG9, "Image bytes read: %d", esp_https_ota_get_image_len_read(https_ota_handle));
+    }
+
+    if (esp_https_ota_is_complete_data_received(https_ota_handle) != true) {
+        // the OTA image was not completely received and user can customise the response to this situation.
+        ESP_LOGE(TAG9, "Complete data was not received.");
+    } else {
+        ota_finish_err = esp_https_ota_finish(https_ota_handle);
+        if ((err == ESP_OK) && (ota_finish_err == ESP_OK)) {
+            ESP_LOGI(TAG9, "ESP_HTTPS_OTA upgrade successful. Rebooting ...");
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            esp_restart();
+        } else {
+            if (ota_finish_err == ESP_ERR_OTA_VALIDATE_FAILED) {
+                ESP_LOGE(TAG9, "Image validation failed, image is corrupted");
+            }
+            ESP_LOGE(TAG, "ESP_HTTPS_OTA upgrade failed 0x%x", ota_finish_err);
+            vTaskDelete(NULL);
+        }
+    }
+
+ota_end:
+    esp_https_ota_abort(https_ota_handle);
+    ESP_LOGE(TAG9, "ESP_HTTPS_OTA upgrade failed");
+    vTaskDelete(NULL);
+}
+
 
 //-----------------------------------------------------------
  int mensajes_enviados()
@@ -318,12 +435,12 @@ void set_debug(bool _debug)
 }
 
 //-----------------------------------------------------------
-void set_deepSleep(int _wakeup_time_sec)
+void set_deepSleep(uint16_t _wakeup_time_sec)
 {
 	wakeup_time_sec=_wakeup_time_sec;
 }
 
-void set_timeOut(unsigned long _timeOut, bool _enable)
+void set_timeOut(uint16_t _timeOut, bool _enable)
 {
  timeOut = _timeOut;
  timeOutEnabled = _enable;
@@ -333,27 +450,11 @@ void set_timeOut(unsigned long _timeOut, bool _enable)
 void gotoSleep() {
 	// add some randomness to avoid collisions with multiple devices
 	if(debug) ESP_LOGI(TAG7, "Apaga y vamonos");
-	ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000));
+//	ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000));
 	// enter deep sleep
-	esp_deep_sleep_start();
+//	esp_deep_sleep_start();
 }
 
-static void get_mac_address()
-{
-    uint8_t mac[ESP_NOW_ETH_ALEN];
-    esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
-    ESP_LOGI("MAC address", "MAC address: %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-}
-
-static void set_mac_address(uint8_t *mac)
-{
-    esp_err_t err = esp_wifi_set_mac(ESP_IF_WIFI_STA, mac);
-    if (err == ESP_OK) {
-        ESP_LOGI("MAC address", "MAC address successfully set to %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    } else {
-        ESP_LOGE("MAC address", "Failed to set MAC address");
-    }
-}
 
 /* WiFi should start before using ESPNOW */
 static void wifi_init(void) {
@@ -401,15 +502,54 @@ static void espnow_send_cb(const uint8_t *mac_addr,	esp_now_send_status_t status
 		return;
 	}
 
-	if(debug) ESP_LOGI(TAG4, "ENVIO ESPNOW status: %d", status);
 	if(debug) ESP_LOGI(TAG4, "ENVIO ESPNOW status: %s", (status)?"ERROR":"OK");
 	if(debug) ESP_LOGI(TAG4, "MAC: %02X:%02X:%02X:%02X:%02X:%02X", mac_addr[5],mac_addr[4],mac_addr[3],mac_addr[2],mac_addr[1],mac_addr[0]);
+	if(status == 0){
+		if(debug) ESP_LOGI(TAG4, " >> Exito de entrega");
+		if(pairingStatus==PAIR_PAIRED && mensaje_enviado)  // será un mensaje a la pasarela, se podría comprobar la mac
+		{
+			mensaje_enviado = false;
+			//if (terminar && !esperando) gotoSleep();
+		}
+	}
+	else{
+		if(debug) ESP_LOGI(TAG4, " >> Error de entrega");
+		if(pairingStatus == PAIR_PAIRED && mensaje_enviado)
+		{
+			//no hemos conseguido hablar con la pasarela emparejada...
+			// invalidamos config en flash;
 
-	if(pairingStatus==PAIR_PAIRED && mensaje_enviado)  // será un mensaje a la pasarela, se podría comprobar la mac
-	{
-		mensaje_enviado = false;
-
-		//if (terminar && !esperando) gotoSleep();
+			// Save in NVS
+			esp_err_t ret;
+			nvs_handle_t nvs_handle;
+			ret = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+			if (ret != ESP_OK) {
+				if(debug) ESP_LOGI(TAG11, "Error (%s) opening NVS handle!\n", esp_err_to_name(ret));
+			} else {
+				if(debug) ESP_LOGI(TAG11, "Open NVS done\n");
+				if(debug) ESP_LOGI(TAG11, "Adding text to NVS Struct... ");
+				memset(&rtcData, 0, sizeof(struct_rtc));
+				ret = nvs_set_blob(nvs_handle, "nvs_struct", (const void*)&rtcData, sizeof(struct_rtc));
+				if(debug) ESP_LOGI(TAG11, "writing nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
+				// Commit written value.
+				// After setting any values, nvs_commit() must be called to ensure changes are written
+				// to flash storage. Implementations may write to storage at other times,
+				// but this is not guaranteed.
+				if(debug) ESP_LOGI(TAG11, "Committing updates in NVS ... ");
+				ret = nvs_commit(nvs_handle);
+				if(debug) ESP_LOGI(TAG11, "commit nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
+				// Close
+				nvs_close(nvs_handle);
+			}
+			if(debug)  ESP_LOGI(TAG4, " INFO de emparejamiento invalidada");
+			pairingStatus = PAIR_REQUEST; // volvemos a intentarlo?
+			mensaje_enviado=false;
+			terminar=false;
+			vTaskDelay(10);
+			vTaskResume(conexion_hand);
+			//delay(100);
+			//gotoSleep();
+		}
 	}
 
 	if(xQueueSend(cola_resultado_enviados,&resultado, ESPNOW_MAXDELAY) != pdTRUE)ESP_LOGW(TAG, "Send send queue fail");
@@ -421,12 +561,58 @@ static esp_err_t mqtt_process_msg(struct_espnow_rcv_msg *my_msg){
 	if(strcmp (my_msg->topic,"config") == 0){
 		if(debug) ESP_LOGI(TAG8, "payload: %s", my_msg->payload);
 		if(debug) ESP_LOGI(TAG8, "Deserialize payload.....");
-		int tsleep = cJSON_GetObjectItem(root2,"sleep")->valueint;
-		int tout = cJSON_GetObjectItem(root2,"timeout")->valueint;
-		if(debug) ESP_LOGI(TAG8, "tsleep = %d",tsleep);
-		if(debug) ESP_LOGI(TAG8, "tout = %d",tout);
+		rtcConfig.tsleep = cJSON_GetObjectItem(root2,"sleep")->valueint;
+		rtcConfig.timeout = cJSON_GetObjectItem(root2,"timeout")->valueint;
+		if(debug) ESP_LOGI(TAG8, "tsleep = %d",rtcConfig.tsleep);
+		if(debug) ESP_LOGI(TAG8, "timeout = %d",rtcConfig.timeout);
+		// Save in NVS
+		esp_err_t ret;
+		nvs_handle_t nvs_handle;
+		ret = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+		if (ret != ESP_OK) {
+			if(debug) ESP_LOGI(TAG11, "Error (%s) opening NVS handle!\n", esp_err_to_name(ret));
+		} else {
+			if(debug) ESP_LOGI(TAG11, "Open NVS done\n");
+			if(debug) ESP_LOGI(TAG11, "Adding text to NVS Struct... ");
+			rtcData.config[1] = rtcConfig.timeout;
+			rtcData.config[2] = rtcConfig.tsleep;
+			ret = nvs_set_blob(nvs_handle, "nvs_struct", (const void*)&rtcData, sizeof(struct_rtc));
+			if(debug) ESP_LOGI(TAG11, "writing nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
+			// Commit written value.
+			// After setting any values, nvs_commit() must be called to ensure changes are written
+			// to flash storage. Implementations may write to storage at other times,
+			// but this is not guaranteed.
+			if(debug) ESP_LOGI(TAG11, "Committing updates in NVS ... ");
+			ret = nvs_commit(nvs_handle);
+			if(debug) ESP_LOGI(TAG11, "commit nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
+			// Close
+			nvs_close(nvs_handle);
+		}
 	}
+	if(strcmp (my_msg->topic,"update") == 0){
+	    ESP_ERROR_CHECK(esp_netif_init());
+	    ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+	    ESP_ERROR_CHECK(esp_event_handler_register(ESP_HTTPS_OTA_EVENT, ESP_EVENT_ANY_ID, &ota_event_handler, NULL));
+	    /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
+	     * Read "Establishing Wi-Fi or Ethernet Connection" section in
+	     * examples/protocols/README.md for more information about this function.
+	    */
+	    ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
+	        wifi_init_sta();
+    /* Ensure to disable any WiFi power save mode, this allows best throughput
+     * and hence timings for overall OTA operation.
+     */
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
+
+#if CONFIG_BT_BLE_ENABLED || CONFIG_BT_NIMBLE_ENABLED
+    ESP_ERROR_CHECK(esp_ble_helper_init());
+#endif
+
+    xTaskCreate(&advanced_ota_example_task, "advanced_ota_example_task", 1024 * 8, NULL, 5, NULL);
+
+	}
 	free(my_msg->topic);
 	free(my_msg->payload);
 	cJSON_Delete(root2);
@@ -437,7 +623,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
 	uint8_t * mac_addr = recv_info->src_addr;
 	uint8_t type = data[0];
 	uint8_t i;
-	struct struct_pairing *punt = (struct struct_pairing*) data;
+	struct_pairing *punt = (struct_pairing*) data;
 	struct_espnow_rcv_msg *my_msg = malloc(sizeof(struct_espnow_rcv_msg));
 
 	if (mac_addr == NULL || data == NULL || len <= 0) {
@@ -475,6 +661,29 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
 		pairingData.channel=punt->channel;
 		if(debug) ESP_LOGI(TAG8, "ADD PASARELA PEER");
 		pairingStatus=PAIR_PAIRED;
+		// Save in NVS
+		esp_err_t ret;
+		nvs_handle_t nvs_handle;
+		ret = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+		if (ret != ESP_OK) {
+			if(debug) ESP_LOGI(TAG11, "Error (%s) opening NVS handle!\n", esp_err_to_name(ret));
+		} else {
+			if(debug) ESP_LOGI(TAG11, "Open NVS done\n");
+			if(debug) ESP_LOGI(TAG11, "Adding text to NVS Struct... ");
+			rtcData.code1 = MAGIC_CODE1;
+			memcpy(&(rtcData.data), &pairingData, sizeof(pairingData));
+			ret = nvs_set_blob(nvs_handle, "nvs_struct", (const void*)&rtcData, sizeof(struct_rtc));
+			if(debug) ESP_LOGI(TAG11, "writing nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
+			// Commit written value.
+			// After setting any values, nvs_commit() must be called to ensure changes are written
+			// to flash storage. Implementations may write to storage at other times,
+			// but this is not guaranteed.
+			if(debug) ESP_LOGI(TAG11, "Committing updates in NVS ... ");
+			ret = nvs_commit(nvs_handle);
+			if(debug) ESP_LOGI(TAG11, "commit nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
+			// Close
+			nvs_close(nvs_handle);
+		}
 		if(debug) ESP_LOGI(TAG8, "LIBERADO SEMAFORO ENVIO: EMPAREJAMIENTO");
 		xSemaphoreGive(semaforo_envio);
 		break;
@@ -589,7 +798,7 @@ static void mantener_conexion(void *pvParameter)
 		if((esp_timer_get_time()-start_time)/1000 > timeOut && timeOutEnabled )
 		{
 			if(debug) ESP_LOGI(TAG2,"SE PASO EL TIEMPO SIN EMPAREJAR o SIN ENVIAR");
-			if(debug) ESP_LOGI(TAG2,"millis = %lld limite: %ld",esp_timer_get_time(),timeOut);
+			if(debug) ESP_LOGI(TAG2,"millis = %lld limite: %d",esp_timer_get_time(),timeOut);
 			gotoSleep();
 		}
 		switch(pairingStatus) {
@@ -620,7 +829,7 @@ static void mantener_conexion(void *pvParameter)
 			break;
 
 		case PAIR_PAIRED:
-			vTaskSuspend(NULL);
+			vTaskSuspend(conexion_hand);
 			break;
 		}
 	}
@@ -631,8 +840,6 @@ void autopairing_init()
 {
 	start_time = esp_timer_get_time();
 	wifi_init();
-	semaforo_envio = xSemaphoreCreateBinary();
-	cola_resultado_enviados = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(espnow_send_cb_t));
 	xTaskCreate(mantener_conexion, "conexion", 4096, NULL, 1, &conexion_hand);
 }
 
@@ -691,7 +898,7 @@ static esp_err_t adc_init(struct_adclist *my_reads){
 
 	unsigned long endwait = convertion_time*lengthADC1_CHAN + (esp_timer_get_time()/1000);
 
-	while ((esp_timer_get_time()/1000) < endwait) {//
+	while ((esp_timer_get_time()/1000) < endwait) {
 		gpio_set_level(TRIGGER_ADC_PIN, 1);
 		gpio_set_level(BLINK_GPIO, 1);
 		for(int i=0;i<my_reads->num;i++){
@@ -715,7 +922,55 @@ static esp_err_t adc_init(struct_adclist *my_reads){
 	return ESP_OK;
 }
 
+void get_nvs_config(){
+
+}
+
+
+
 void app_main(void) {
+
+	// Initialize NVS
+	esp_err_t ret = nvs_flash_init();
+	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+		// 1.OTA app partition table has a smaller NVS partition size than the non-OTA
+		// partition table. This size mismatch may cause NVS initialization to fail.
+		// 2.NVS partition contains data in new format and cannot be recognized by this version of code.
+		// If this happens, we erase NVS partition and initialize NVS again.
+		ESP_ERROR_CHECK(nvs_flash_erase());
+		ret = nvs_flash_init();
+	}
+	ESP_ERROR_CHECK(ret);
+
+
+	set_debug(true);
+
+	nvs_handle_t nvs_handle;
+	ret = nvs_open("storage", NVS_READONLY, &nvs_handle);
+	if (ret != ESP_OK) {
+		if(debug) ESP_LOGI(TAG11, "Error (%s) opening NVS handle!", esp_err_to_name(ret));
+	} else {
+		if(debug) ESP_LOGI(TAG11, "Open NVS done");
+		size_t required_size;
+		ret = nvs_get_blob(nvs_handle, "nvs_struct", (void *)&rtcData, &required_size);
+		switch (ret) {
+		case ESP_OK:
+			if(debug) ESP_LOGI(TAG11, "Done");
+			break;
+		case ESP_ERR_NVS_NOT_FOUND:
+			if(debug) ESP_LOGI(TAG11, "The value is not initialized yet!");
+			required_size = sizeof(struct_rtc);
+			rtcData.config[1] = timeOut;
+			rtcData.config[2] = wakeup_time_sec;
+			if(debug) ESP_LOGI(TAG, "Initialize timeout after wake up = %d ",rtcData.config[1]);
+			if(debug) ESP_LOGI(TAG, "Initialize time for sleep = %d ",rtcData.config[2]);
+			break;
+		default :
+			if(debug) ESP_LOGI(TAG11, "Error (%s) reading!\n", esp_err_to_name(ret));
+		}
+	}
+
+
 	uint8_t resultado;
 	cJSON *root, *fmt;
 	char tag[25];
@@ -733,22 +988,90 @@ void app_main(void) {
 		for(int j=0;j<FILTER_LEN;j++)my_reads->adc_read[i].adc_buff[j]=0;
 	}
 
-	set_debug(true);
-	set_deepSleep(10);
-	set_timeOut(3000,true); // tiempo máximo
-	// Initialize NVS
-	esp_err_t ret = nvs_flash_init();
-	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-		ESP_ERROR_CHECK(nvs_flash_erase());
-		ret = nvs_flash_init();
+
+	start_time = esp_timer_get_time();
+	semaforo_envio = xSemaphoreCreateBinary();
+	cola_resultado_enviados = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(espnow_send_cb_t));
+
+
+	if(rtcData.code1 == MAGIC_CODE1){
+		// recover information saved in NVS memory
+		memcpy(&pairingData, &(rtcData.data), sizeof(pairingData));
+		if(debug) ESP_LOGI(TAG, "timeout = %d ",rtcData.config[1]);
+		if(debug) ESP_LOGI(TAG, "tsleep = %d ",rtcData.config[2]);
+		(rtcData.config[1] == 0) ?  set_timeOut(3000,true) : set_timeOut(rtcData.config[1],true);
+		(rtcData.config[2] == 0) ?  set_deepSleep(10) : set_deepSleep(rtcData.config[2]);
+		// set WiFi channel
+		wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+		ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+		if(debug) ESP_LOGI(TAG5, "Wifi initialized without problems...\n");
+		ESP_ERROR_CHECK(esp_wifi_start());
+		if(debug) ESP_LOGI(TAG5, "Wifi started without problems...\n");
+		ESP_ERROR_CHECK(esp_wifi_set_mode(ESPNOW_WIFI_MODE));
+		if(debug) ESP_LOGI(TAG5, "Wifi set mode STA\n");
+		ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
+		ESP_ERROR_CHECK(esp_wifi_set_channel(pairingData.channel, WIFI_SECOND_CHAN_NONE));
+		if(debug) ESP_LOGI(TAG5, "Wifi setting channel  = %d\n", pairingData.channel);
+		ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
+		if(debug) ESP_LOGI(TAG5, "Wifi setting promiscuous = false\n");
+		ESP_ERROR_CHECK(esp_wifi_disconnect());
+		if(debug) ESP_LOGI(TAG5, "Wifi  disconnected\n");
+		ESP_ERROR_CHECK(esp_now_init());
+		if(debug) ESP_LOGI(TAG5, "Wifi esp_now initialized\n");
+
+		ESP_ERROR_CHECK(esp_now_register_send_cb(espnow_send_cb));
+		ESP_ERROR_CHECK(esp_now_register_recv_cb(espnow_recv_cb));
+
+#if CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE
+		ESP_ERROR_CHECK( esp_now_set_wake_window(65535) );
+#endif
+
+		if(debug) ESP_LOGI(TAG, "Emparejamiento recuperado de la memoria RTC del usuario ");
+		if(debug) ESP_LOGI(TAG, "%02X:%02X:%02X:%02X:%02X:%02X", pairingData.macAddr[5],pairingData.macAddr[4],pairingData.macAddr[3],pairingData.macAddr[2],pairingData.macAddr[1],pairingData.macAddr[0]);
+		if(debug) ESP_LOGI(TAG, "en el canal %d en %f ms", pairingData.channel, (float)(esp_timer_get_time() - start_time)/1000);
+
+		esp_now_peer_info_t peer;
+		peer.channel = pairingData.channel;
+		peer.ifidx = ESPNOW_WIFI_IF;
+		peer.encrypt = false;
+		memcpy(peer.peer_addr, pairingData.macAddr, ESP_NOW_ETH_ALEN);
+		ESP_ERROR_CHECK( esp_now_add_peer(&peer) );
+		if(debug) ESP_LOGI(TAG8, "ADD PASARELA PEER");
+		pairingStatus=PAIR_PAIRED;
+		if(debug) ESP_LOGI(TAG8, "LIBERADO SEMAFORO ENVIO: EMPAREJAMIENTO");
+		xSemaphoreGive(semaforo_envio);
+		vTaskDelay(10);
 	}
-	ESP_ERROR_CHECK(ret);
+	else{
+		autopairing_init();
+	}
+
 
 	struct timeval now;
 	gettimeofday(&now, NULL);
 	int sleep_time_ms = (now.tv_sec - sleep_enter_time.tv_sec) * 1000 + (now.tv_usec - sleep_enter_time.tv_usec) / 1000;
 
-	autopairing_init();
+	//*************** START TEST OTA *********************//
+	//	ESP_ERROR_CHECK(esp_netif_init());
+	//	ESP_ERROR_CHECK(esp_event_loop_create_default());
+	//
+	//	ESP_ERROR_CHECK(esp_event_handler_register(ESP_HTTPS_OTA_EVENT, ESP_EVENT_ANY_ID, &ota_event_handler, NULL));
+	//
+	//	ESP_ERROR_CHECK(example_connect());
+	/* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
+	 * Read "Establishing Wi-Fi or Ethernet Connection" section in
+	 * examples/protocols/README.md for more information about this function.
+	 */
+//		ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
+//		wifi_init_sta();
+	/* Ensure to disable any WiFi power save mode, this allows best throughput
+	 * and hence timings for overall OTA operation.
+	 */
+//		esp_wifi_set_ps(WIFI_PS_NONE);
+//
+//		xTaskCreate(&advanced_ota_example_task, "advanced_ota_example_task", 1024 * 8, NULL, 5, NULL);
+	//*************** END TEST OTA *********************//
+
 
 	while(1){
 		if(envio_disponible()){
@@ -759,6 +1082,7 @@ void app_main(void) {
 				if(debug) ESP_LOGI(TAG, "Serialize readings of channel %d",i);
 				sprintf(tag,"Sensor%d", i);
 				cJSON_AddItemToObject(root, tag, fmt=cJSON_CreateObject());
+				cJSON_AddNumberToObject(fmt, "adc_filtered", get_adc_filtered_read(my_reads,i));
 				cJSON_AddNumberToObject(fmt, "adc_voltage", get_adc_voltage_read(my_reads,i));
 			}
 
@@ -781,38 +1105,38 @@ void app_main(void) {
 ---------------------------------------------------------------*/
 static bool adc_calibration_init(adc_unit_t unit, adc_atten_t atten, adc_cali_handle_t *out_handle)
 {
-    adc_cali_handle_t handle = NULL;
-    esp_err_t ret = ESP_FAIL;
-    bool calibrated = false;
+	adc_cali_handle_t handle = NULL;
+	esp_err_t ret = ESP_FAIL;
+	bool calibrated = false;
 
-    if (!calibrated) {
-        ESP_LOGI(TAG2, "calibration scheme version is %s", "Curve Fitting");
-        adc_cali_curve_fitting_config_t cali_config = {
-            .unit_id = unit,
-            .atten = atten,
-            .bitwidth = ADC_BITWIDTH_DEFAULT,
-        };
-        ret = adc_cali_create_scheme_curve_fitting(&cali_config, &handle);
-        if (ret == ESP_OK) {
-            calibrated = true;
-        }
-    }
+	if (!calibrated) {
+		ESP_LOGI(TAG2, "calibration scheme version is %s", "Curve Fitting");
+		adc_cali_curve_fitting_config_t cali_config = {
+				.unit_id = unit,
+				.atten = atten,
+				.bitwidth = ADC_BITWIDTH_DEFAULT,
+		};
+		ret = adc_cali_create_scheme_curve_fitting(&cali_config, &handle);
+		if (ret == ESP_OK) {
+			calibrated = true;
+		}
+	}
 
-    *out_handle = handle;
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG2, "Calibration Success");
-    } else if (ret == ESP_ERR_NOT_SUPPORTED || !calibrated) {
-        ESP_LOGW(TAG2, "eFuse not burnt, skip software calibration");
-    } else {
-        ESP_LOGE(TAG2, "Invalid arg or no memory");
-    }
+	*out_handle = handle;
+	if (ret == ESP_OK) {
+		ESP_LOGI(TAG2, "Calibration Success");
+	} else if (ret == ESP_ERR_NOT_SUPPORTED || !calibrated) {
+		ESP_LOGW(TAG2, "eFuse not burnt, skip software calibration");
+	} else {
+		ESP_LOGE(TAG2, "Invalid arg or no memory");
+	}
 
-    return calibrated;
+	return calibrated;
 }
 
 static void adc_calibration_deinit(adc_cali_handle_t handle)
 {
-    ESP_LOGI(TAG2, "deregister %s calibration scheme", "Curve Fitting");
-    ESP_ERROR_CHECK(adc_cali_delete_scheme_curve_fitting(handle));
+	ESP_LOGI(TAG2, "deregister %s calibration scheme", "Curve Fitting");
+	ESP_ERROR_CHECK(adc_cali_delete_scheme_curve_fitting(handle));
 
 }

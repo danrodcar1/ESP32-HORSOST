@@ -15,12 +15,12 @@
 // message flags
 #define CHECK   0b10000000
 
-#define MAX 100
+#define MAX_BUFF 100
 
 char * messType2String(uint8_t type)
 {
   char *text;
-  char *buffer = malloc(MAX);
+  char *buffer = malloc(MAX_BUFF);
   switch (type & MASK_MSG_TYPE)
   {
     case PAN_DATA :
@@ -56,8 +56,21 @@ long long dec2bin(int n) {
     bin += rem * i;
     i *= 10;
   }
-
   return bin;
+}
+
+bool to_hex(char* dest, size_t dest_len, const uint8_t* values, size_t val_len) {
+    static const char hex_table[] = "0123456789ABCDEF";
+    if(dest_len < (val_len*2+1)) /* check that dest is large enough */
+        return false;
+    while(val_len--) {
+        /* shift down the top nibble and pick a char from the hex_table */
+        *dest++ = hex_table[*values >> 4];
+        /* extract the bottom nibble and pick a char from the hex_table */
+        *dest++ = hex_table[*values++ & 0xF];
+    }
+    *dest = 0;
+    return true;
 }
 
 
@@ -66,19 +79,7 @@ long long dec2bin(int n) {
 #define GATEWAY 0
 #define ESPNOW_DEVICE 1
 
-struct struct_pairing {      // new structure for pairing
-    uint8_t msgType;
-    uint8_t id;
-    uint8_t macAddr[6];
-    uint8_t channel;
-    uint8_t padding[3];
-};
 
-
-struct struct_espnow {      // esp-now message structure
-    uint8_t msgType;
-    uint8_t payload[249];
-};
 /*
 //-----------------------------------------------------
 // devuelve 2 caracteres HEX para un byte
