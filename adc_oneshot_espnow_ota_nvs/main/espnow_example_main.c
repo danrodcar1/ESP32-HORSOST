@@ -336,6 +336,8 @@ void advanced_ota_example_task(void *pvParameter)
 	esp_err_t err = esp_https_ota_begin(&ota_config, &https_ota_handle);
 	if (err != ESP_OK) {
 		ESP_LOGE(TAG9, "ESP HTTPS OTA Begin failed");
+		updateStatus = NO_UPDATE_FOUND;
+		gotoSleep();
 		vTaskDelete(NULL);
 	}
 
@@ -383,8 +385,6 @@ void advanced_ota_example_task(void *pvParameter)
 	ota_end:
 	esp_https_ota_abort(https_ota_handle);
 	ESP_LOGE(TAG9, "ESP_HTTPS_OTA upgrade failed");
-	// get deep sleep enter time
-	gettimeofday(&sleep_enter_time, NULL);
 	gotoSleep();
 	vTaskDelete(NULL);
 }
@@ -428,6 +428,8 @@ void set_timeOut(uint16_t _timeOut, bool _enable)
 
 //--------------------------------------------------------
 void gotoSleep() {
+	// get deep sleep enter time
+	gettimeofday(&sleep_enter_time, NULL);
 	// add some randomness to avoid collisions with multiple devices
 	if(debug) ESP_LOGI(TAG7, "Apaga y vamonos");
 //	ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000));
@@ -1017,9 +1019,8 @@ void app_main(void) {
 			free(my_reads);
 			cJSON_Delete(root);
 			cJSON_free(my_json_string);
-			//*************** START OTA *********************//
-			if(updateStatus == THERE_IS_AN_UPDATE_AVAILABLE){
-				updateStatus = I_AM_UPDATING;
+			switch (updateStatus) {
+			case THERE_IS_AN_UPDATE_AVAILABLE:
 				ESP_ERROR_CHECK(esp_wifi_stop());
 				if(debug) ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
 				wifi_init_sta();
@@ -1028,16 +1029,16 @@ void app_main(void) {
 				 */
 				esp_wifi_set_ps(WIFI_PS_NONE);
 				xTaskCreate(&advanced_ota_example_task, "advanced_ota_example_task", 1024 * 8, NULL, 5, NULL);
+				break;
+			case NO_UPDATE_FOUND:
+				// get deep sleep enter time
+				gettimeofday(&sleep_enter_time, NULL);
+				gotoSleep();
+				break;
+			default :
 			}
-			//*************** END OTA *********************//
-			break;
 		}
 		vTaskDelay(1);
-	}
-	if(updateStatus != I_AM_UPDATING){
-		// get deep sleep enter time
-		gettimeofday(&sleep_enter_time, NULL);
-		gotoSleep();
 	}
 }
 
