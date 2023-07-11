@@ -59,38 +59,6 @@
 #include "esp_https_ota.h"
 #include "protocol_examples_common.h"
 
-// DEEP SLEEP VARS
-int wakeup_time_sec = 10;
-int mensajes_sent = 0;
-int panAddress = 1;
-int config_size = 0;
-bool esperando = false;
-bool terminar = false;
-bool mensaje_enviado = false;
-bool debug = false;
-bool nvs_enable = true;
-bool update_enable = false;
-bool updating = false;
-uint16_t timeOut = 3000;
-unsigned long start_time;
-bool timeOutEnabled = false;
-
-static RTC_DATA_ATTR struct timeval sleep_enter_time;
-
-
-static int espnow_channel = CANAL;
-
-#define ESP_WIFI_SAE_MODE WPA3_SAE_PWE_HUNT_AND_PECK
-#define H2E_IDENTIFIER CONFIG_ESP_WIFI_PW_ID
-
-
-#define ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD WIFI_AUTH_OPEN
-
-
-TaskHandle_t adcTaskHandle = NULL;
-adc_oneshot_unit_handle_t adc1_handle;
-adc_cali_handle_t adc1_cali_handle = NULL;
-bool do_calibration;
 
 static const char *TAG  = "* mainApp";
 static const char *TAG2 = "* adc_reads";
@@ -104,56 +72,87 @@ static const char *TAG9 = "* advanced https ota";
 static const char *TAG10 = "* wifi station";
 static const char *TAG11 = "* nvs init";
 
-static QueueHandle_t cola_resultado_enviados;
-static SemaphoreHandle_t semaforo_envio;
 
-/* FreeRTOS event group to signal when we are connected*/
+/*---------------------------------------------------------------
+        WiFi variables and ESP-NOW def.
+        - Create event group with "EventGroupHandle_t" to signal when we are connected
+        - Initialize max number to try connections
+        - Set up esp-now channel and some variables to start de pairing
+        - Set up update flag
+        - Creat queue and semaphore to coordinate the send procedure.
+        - Stablish broadcast mac by default
+---------------------------------------------------------------*/
 static EventGroupHandle_t s_wifi_event_group;
 
-
-
 static int s_retry_num = 0;
-
+static int espnow_channel = CANAL;
 PairingStatus pairingStatus=PAIR_REQUEST;
 UpdateStatus updateStatus = NO_UPDATE_FOUND;
 TaskHandle_t conexion_hand = NULL;
+static QueueHandle_t cola_resultado_enviados;
+static SemaphoreHandle_t semaforo_envio;
 
 struct_pairing pairingData;
 struct_config nvsConfig;
 struct_rtc nvsData;
-RTC_NOINIT_ATTR struct_adclist rtcReads;
 
 static uint8_t s_example_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 uint8_t mac_address[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
-// VARIABLES
 
-bool conv_on;
-
-
+// Others control vars
+int wakeup_time_sec = 10;
+int mensajes_sent = 0;
+int panAddress = 1;
+int config_size = 0;
+bool esperando = false;
+bool terminar = false;
+bool mensaje_enviado = false;
+bool debug = false;
+bool nvs_enable = true;
+uint16_t timeOut = 3000;
+unsigned long start_time;
+bool timeOutEnabled = false;
+/*---------------------------------------------------------------
+        ADC variables
+        - Create task handle to know when we have to point the ADC conversor
+        - Do the same with the calibration unit
+        - Set up adc channels
+        - Set up convertion-time studied for one analog sensor previously
+---------------------------------------------------------------*/
 
 //ADC1 Channels
+TaskHandle_t adcTaskHandle = NULL;
+adc_oneshot_unit_handle_t adc1_handle;
+adc_cali_handle_t adc1_cali_handle = NULL;
+bool do_calibration;
 const int adc_channel[1] = {ADC_CHANNEL_0};
 //static adc_channel_t adc_channel[4] = {ADC_CHANNEL_0,ADC_CHANNEL_1,ADC_CHANNEL_2,ADC_CHANNEL_4};
 uint8_t lengthADC1_CHAN = sizeof(adc_channel) / sizeof(adc_channel_t);
 
 float EMA_ALPHA = 0.6;
 
-
-extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
-extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
-
-
 unsigned long convertion_time = 200;
 
+/*---------------------------------------------------------------
+        This struc will storage in slow RTC memory some vars
+		- struct timeval cointains Structure returned by gettimeofday(2) system call, and used in other calls
+			-> tv_sec = seconds
+			-> tv_usec = microseconds
+---------------------------------------------------------------*/
+typedef struct{
+	struct timeval sleep_enter_time;
+}struct_rtcdata;
+
+static RTC_DATA_ATTR struct_rtcdata rtcData;
 
 // Function prototypes
 static bool adc_calibration_init(adc_unit_t unit, adc_atten_t atten, adc_cali_handle_t *out_handle);
 static void adc_calibration_deinit(adc_cali_handle_t handle);
 uint8_t espnow_send(char * mensaje, bool fin, uint8_t _msgType);
-uint8_t set_nvs_config();
-void get_nvs_config();
 void gotoSleep();
+void autopairing_init();
+static inline void nvs_saving_task();
 
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 		int32_t event_id, void* event_data)
@@ -313,7 +312,7 @@ static esp_err_t _http_client_init_cb(esp_http_client_handle_t http_client)
 	return err;
 }
 
-void advanced_ota_example_task(void *pvParameter)
+void advance_ota_task()
 {
 	ESP_LOGI(TAG9, "Starting Advanced OTA example");
 	vTaskDelay(20 / portTICK_PERIOD_MS);
@@ -338,7 +337,6 @@ void advanced_ota_example_task(void *pvParameter)
 		ESP_LOGE(TAG9, "ESP HTTPS OTA Begin failed");
 		updateStatus = NO_UPDATE_FOUND;
 		gotoSleep();
-		vTaskDelete(NULL);
 	}
 
 	esp_app_desc_t app_desc;
@@ -367,6 +365,7 @@ void advanced_ota_example_task(void *pvParameter)
 	if (esp_https_ota_is_complete_data_received(https_ota_handle) != true) {
 		// the OTA image was not completely received and user can customise the response to this situation.
 		ESP_LOGE(TAG9, "Complete data was not received.");
+		goto ota_end;
 	} else {
 		ota_finish_err = esp_https_ota_finish(https_ota_handle);
 		if ((err == ESP_OK) && (ota_finish_err == ESP_OK)) {
@@ -378,7 +377,7 @@ void advanced_ota_example_task(void *pvParameter)
 				ESP_LOGE(TAG9, "Image validation failed, image is corrupted");
 			}
 			ESP_LOGE(TAG, "ESP_HTTPS_OTA upgrade failed 0x%x", ota_finish_err);
-			vTaskDelete(NULL);
+			goto ota_end;
 		}
 	}
 
@@ -386,7 +385,6 @@ void advanced_ota_example_task(void *pvParameter)
 	esp_https_ota_abort(https_ota_handle);
 	ESP_LOGE(TAG9, "ESP_HTTPS_OTA upgrade failed");
 	gotoSleep();
-	vTaskDelete(NULL);
 }
 
 
@@ -429,12 +427,11 @@ void set_timeOut(uint16_t _timeOut, bool _enable)
 //--------------------------------------------------------
 void gotoSleep() {
 	// get deep sleep enter time
-	gettimeofday(&sleep_enter_time, NULL);
+	gettimeofday(&rtcData.sleep_enter_time, NULL);
 	// add some randomness to avoid collisions with multiple devices
 	if(debug) ESP_LOGI(TAG7, "Apaga y vamonos");
-//	ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000));
 	// enter deep sleep
-//	esp_deep_sleep_start();
+	esp_deep_sleep_start();
 }
 
 
@@ -486,54 +483,59 @@ static void espnow_send_cb(const uint8_t *mac_addr,	esp_now_send_status_t status
 
 	if(debug) ESP_LOGI(TAG4, "ENVIO ESPNOW status: %s", (status)?"ERROR":"OK");
 	if(debug) ESP_LOGI(TAG4, "MAC: %02X:%02X:%02X:%02X:%02X:%02X", mac_addr[5],mac_addr[4],mac_addr[3],mac_addr[2],mac_addr[1],mac_addr[0]);
-	if(status == 0){
+//	if(status == 0){
 		if(debug) ESP_LOGI(TAG4, " >> Exito de entrega");
 		if(pairingStatus==PAIR_PAIRED && mensaje_enviado)  // será un mensaje a la pasarela, se podría comprobar la mac
 		{
 			mensaje_enviado = false;
-			//if (terminar && !esperando) gotoSleep();
+			if (terminar && !esperando) gotoSleep();
 		}
-	}
-	else{
-		if(debug) ESP_LOGI(TAG4, " >> Error de entrega");
-		if(pairingStatus == PAIR_PAIRED && mensaje_enviado)
-		{
-			//no hemos conseguido hablar con la pasarela emparejada...
-			// invalidamos config en flash;
-			// Save in NVS
-			esp_err_t ret;
-			nvs_handle_t nvs_handle;
-			ret = nvs_open("storage", NVS_READWRITE, &nvs_handle);
-			if (ret != ESP_OK) {
-				if(debug) ESP_LOGI(TAG11, "Error (%s) opening NVS handle!\n", esp_err_to_name(ret));
-			} else {
-				if(debug) ESP_LOGI(TAG11, "Open NVS done\n");
-				if(debug) ESP_LOGI(TAG11, "Adding text to NVS Struct... ");
-				memset(&nvsData, 0, sizeof(struct_rtc));
-				ret = nvs_set_blob(nvs_handle, "nvs_struct", (const void*)&nvsData, sizeof(struct_rtc));
-				if(debug) ESP_LOGI(TAG11, "writing nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
-				// Commit written value.
-				// After setting any values, nvs_commit() must be called to ensure changes are written
-				// to flash storage. Implementations may write to storage at other times,
-				// but this is not guaranteed.
-				if(debug) ESP_LOGI(TAG11, "Committing updates in NVS ... ");
-				ret = nvs_commit(nvs_handle);
-				if(debug) ESP_LOGI(TAG11, "commit nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
-				// Close
-				nvs_close(nvs_handle);
-			}
-			if(debug)  ESP_LOGI(TAG4, " INFO de emparejamiento invalidada");
-			pairingStatus = PAIR_REQUEST; // volvemos a intentarlo?
-			mensaje_enviado=false;
-			terminar=false;
-			vTaskDelay(100 / portTICK_PERIOD_MS);
-			vTaskResume(conexion_hand);
-			vTaskDelay(100 / portTICK_PERIOD_MS);
-			gotoSleep();
-		}
-	}
+//	}
+//	else{
+//		if(debug) ESP_LOGI(TAG4, " >> Error de entrega");
+//		if(pairingStatus == PAIR_PAIRED && mensaje_enviado)
+//		{
+//			//no hemos conseguido hablar con la pasarela emparejada...
+//			// invalidamos config en flash;
+//			memset(&nvsData, 0, sizeof(struct_rtc));
+//			nvs_saving_task();
+//			if(debug)  ESP_LOGI(TAG4, " INFO de emparejamiento invalidada");
+//			pairingStatus = PAIR_REQUEST; // volvemos a intentarlo?
+//			mensaje_enviado=false;
+//			terminar=false;
+//			ESP_ERROR_CHECK(esp_wifi_stop());
+//			vTaskDelay(100 / portTICK_PERIOD_MS);
+//			autopairing_init();
+//			vTaskDelay(timeOut / portTICK_PERIOD_MS);
+//			gotoSleep();
+//		}
+//	}
 
 	if(xQueueSend(cola_resultado_enviados,&resultado, ESPNOW_MAXDELAY) != pdTRUE)ESP_LOGW(TAG, "Send send queue fail");
+}
+
+static inline void nvs_saving_task(){
+	// Save in NVS
+	esp_err_t ret;
+	nvs_handle_t nvs_handle;
+	ret = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+	if (ret != ESP_OK) {
+		if(debug) ESP_LOGI(TAG11, "Error (%s) opening NVS handle!\n", esp_err_to_name(ret));
+	} else {
+		if(debug) ESP_LOGI(TAG11, "Open NVS done\n");
+		if(debug) ESP_LOGI(TAG11, "Adding text to NVS Struct... ");
+		ret = nvs_set_blob(nvs_handle, "nvs_struct", (const void*)&nvsData, sizeof(struct_rtc));
+		if(debug) ESP_LOGI(TAG11, "writing nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
+		// Commit written value.
+		// After setting any values, nvs_commit() must be called to ensure changes are written
+		// to flash storage. Implementations may write to storage at other times,
+		// but this is not guaranteed.
+		if(debug) ESP_LOGI(TAG11, "Committing updates in NVS ... ");
+		ret = nvs_commit(nvs_handle);
+		if(debug) ESP_LOGI(TAG11, "commit nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
+		// Close
+		nvs_close(nvs_handle);
+	}
 }
 
 static esp_err_t mqtt_process_msg(struct_espnow_rcv_msg *my_msg){
@@ -542,33 +544,17 @@ static esp_err_t mqtt_process_msg(struct_espnow_rcv_msg *my_msg){
 	if(strcmp (my_msg->topic,"config") == 0){
 		if(debug) ESP_LOGI(TAG8, "payload: %s", my_msg->payload);
 		if(debug) ESP_LOGI(TAG8, "Deserialize payload.....");
-		nvsConfig.tsleep = cJSON_GetObjectItem(root2,"sleep")->valueint;
-		nvsConfig.timeout = cJSON_GetObjectItem(root2,"timeout")->valueint;
-		if(debug) ESP_LOGI(TAG8, "tsleep = %d",nvsConfig.tsleep);
-		if(debug) ESP_LOGI(TAG8, "timeout = %d",nvsConfig.timeout);
-		// Save in NVS
-		esp_err_t ret;
-		nvs_handle_t nvs_handle;
-		ret = nvs_open("storage", NVS_READWRITE, &nvs_handle);
-		if (ret != ESP_OK) {
-			if(debug) ESP_LOGI(TAG11, "Error (%s) opening NVS handle!\n", esp_err_to_name(ret));
-		} else {
-			if(debug) ESP_LOGI(TAG11, "Open NVS done\n");
-			if(debug) ESP_LOGI(TAG11, "Adding text to NVS Struct... ");
-			nvsData.config[1] = nvsConfig.timeout;
-			nvsData.config[2] = nvsConfig.tsleep;
-			ret = nvs_set_blob(nvs_handle, "nvs_struct", (const void*)&nvsData, sizeof(struct_rtc));
-			if(debug) ESP_LOGI(TAG11, "writing nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
-			// Commit written value.
-			// After setting any values, nvs_commit() must be called to ensure changes are written
-			// to flash storage. Implementations may write to storage at other times,
-			// but this is not guaranteed.
-			if(debug) ESP_LOGI(TAG11, "Committing updates in NVS ... ");
-			ret = nvs_commit(nvs_handle);
-			if(debug) ESP_LOGI(TAG11, "commit nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
-			// Close
-			nvs_close(nvs_handle);
-		}
+		cJSON *sleep = cJSON_GetObjectItem(root2,"sleep");
+		cJSON *timeout = cJSON_GetObjectItem(root2,"timeout");
+		cJSON *pan = cJSON_GetObjectItem(root2,"pan");
+
+		if(timeout) nvsData.config[1] = timeout->valueint;
+		if(sleep) nvsData.config[2] = sleep->valueint;
+		if(pan) nvsData.config[3] = pan->valueint;
+		if(debug) ESP_LOGI(TAG8, "tsleep = %d",nvsData.config[1]);
+		if(debug) ESP_LOGI(TAG8, "timeout = %d",nvsData.config[2]);
+		if(debug) ESP_LOGI(TAG8, "PAN_ID = %d",nvsData.config[3]);
+		nvs_saving_task();
 	}
 	if(strcmp (my_msg->topic,"update") == 0){
 		updateStatus = THERE_IS_AN_UPDATE_AVAILABLE;
@@ -621,29 +607,9 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
 		pairingData.channel=punt->channel;
 		if(debug) ESP_LOGI(TAG8, "ADD PASARELA PEER");
 		pairingStatus=PAIR_PAIRED;
-		// Save in NVS
-		esp_err_t ret;
-		nvs_handle_t nvs_handle;
-		ret = nvs_open("storage", NVS_READWRITE, &nvs_handle);
-		if (ret != ESP_OK) {
-			if(debug) ESP_LOGI(TAG11, "Error (%s) opening NVS handle!\n", esp_err_to_name(ret));
-		} else {
-			if(debug) ESP_LOGI(TAG11, "Open NVS done\n");
-			if(debug) ESP_LOGI(TAG11, "Adding text to NVS Struct... ");
-			nvsData.code1 = MAGIC_CODE1;
-			memcpy(&(nvsData.data), &pairingData, sizeof(pairingData));
-			ret = nvs_set_blob(nvs_handle, "nvs_struct", (const void*)&nvsData, sizeof(struct_rtc));
-			if(debug) ESP_LOGI(TAG11, "writing nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
-			// Commit written value.
-			// After setting any values, nvs_commit() must be called to ensure changes are written
-			// to flash storage. Implementations may write to storage at other times,
-			// but this is not guaranteed.
-			if(debug) ESP_LOGI(TAG11, "Committing updates in NVS ... ");
-			ret = nvs_commit(nvs_handle);
-			if(debug) ESP_LOGI(TAG11, "commit nvs status: %s", (ret != ESP_OK) ? "Failed!" : "Done");
-			// Close
-			nvs_close(nvs_handle);
-		}
+		nvsData.code1 = MAGIC_CODE1;
+		memcpy(&(nvsData.data), &pairingData, sizeof(pairingData));
+		nvs_saving_task();
 		if(debug) ESP_LOGI(TAG8, "LIBERADO SEMAFORO ENVIO: EMPAREJAMIENTO");
 		xSemaphoreGive(semaforo_envio);
 		break;
@@ -750,7 +716,7 @@ static esp_err_t espnow_init(void) {
 	return ESP_OK;
 }
 
-static void mantener_conexion(void *pvParameter)
+static void keep_connection_task(void *pvParameter)
 {
 	while(1)
 	{
@@ -783,7 +749,7 @@ static void mantener_conexion(void *pvParameter)
 				// time out expired,  try next channel
 			{
 				espnow_channel ++;
-				if (espnow_channel > 11) espnow_channel = 0;
+				if (espnow_channel > 11) espnow_channel = 1;
 				pairingStatus = PAIR_REQUEST;
 			}
 			break;
@@ -800,7 +766,7 @@ void autopairing_init()
 {
 	start_time = esp_timer_get_time();
 	wifi_init();
-	xTaskCreate(mantener_conexion, "conexion", 4096, NULL, 1, &conexion_hand);
+	xTaskCreate(keep_connection_task, "conexion", 4096, NULL, 1, &conexion_hand);
 }
 
 uint32_t read_adc_avg(struct_adclist *ADC_Raw, int chn)
@@ -993,19 +959,25 @@ void app_main(void) {
 		autopairing_init();
 	}
 
-	//	if(debug) ESP_LOGI(TAG,"adc_filtered = %lu", rtcReads.adc_read[0].adc_filtered);
+
+	ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000));
 
 	struct timeval now;
 	gettimeofday(&now, NULL);
-	int sleep_time_ms = (now.tv_sec - sleep_enter_time.tv_sec) * 1000 + (now.tv_usec - sleep_enter_time.tv_usec) / 1000;
+	int sleep_time_ms = (now.tv_sec - rtcData.sleep_enter_time.tv_sec) * 1000 + (now.tv_usec - rtcData.sleep_enter_time.tv_usec) / 1000;
 
 	if(debug) ESP_LOGI(TAG, "Wake up from timer. Time spent in deep sleep: %dms\n", sleep_time_ms);
 	while(1){
 		if(envio_disponible()){
-			adc_init(my_reads);
 			cJSON *root, *fmt;
+			const esp_partition_t *running = esp_ota_get_running_partition();
+			esp_app_desc_t running_app_info;
 			char tag[25];
+			adc_init(my_reads);
 			root = cJSON_CreateObject();
+			if (esp_ota_get_partition_description(running, &running_app_info) == ESP_OK) {
+				cJSON_AddStringToObject(root, "fw_version", running_app_info.version);
+			}
 			for(int i=0;i<my_reads->num;i++){
 				if(debug) ESP_LOGI(TAG, "Serialize readings of channel %d",i);
 				sprintf(tag,"Sensor%d", i);
@@ -1024,15 +996,15 @@ void app_main(void) {
 				ESP_ERROR_CHECK(esp_wifi_stop());
 				if(debug) ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
 				wifi_init_sta();
-				/* Ensure to disable any WiFi power save mode, this allows best throughput
+				/*
+				 * Ensure to disable any WiFi power save mode, this allows best throughput
 				 * and hence timings for overall OTA operation.
 				 */
 				esp_wifi_set_ps(WIFI_PS_NONE);
-				xTaskCreate(&advanced_ota_example_task, "advanced_ota_example_task", 1024 * 8, NULL, 5, NULL);
+				advance_ota_task();
 				break;
 			case NO_UPDATE_FOUND:
 				// get deep sleep enter time
-				gettimeofday(&sleep_enter_time, NULL);
 				gotoSleep();
 				break;
 			default :
