@@ -377,25 +377,25 @@ public:
 				if (terminar && !esperando) gotoSleep();
 			}
 		}
-//		else{
-//			if(debug) ESP_LOGI(TAG4, " >> Error de entrega");
-//			if(pairingStatus == PAIR_PAIRED && mensaje_enviado)
-//			{
-//				//no hemos conseguido hablar con la pasarela emparejada...
-//				// invalidamos config en flash;
-//				//				memset(&nvsData, 0, sizeof(struct_rtc));
-//				//				nvs_saving_task();
-//				if(debug)  ESP_LOGI(TAG4, " INFO de emparejamiento invalidada");
-//				pairingStatus = PAIR_REQUEST; // volvemos a intentarlo?
-//				mensaje_enviado=false;
-//				terminar=false;
+		else{
+			if(debug) ESP_LOGI(TAG4, " >> Error de entrega");
+			if(pairingStatus == PAIR_PAIRED && mensaje_enviado)
+			{
+				//no hemos conseguido hablar con la pasarela emparejada...
+				// invalidamos config en flash;
+				memset(&nvsData, 0, sizeof(struct_nvs));
+				nvs_saving_task();
+				if(debug)  ESP_LOGI(TAG4, " INFO de emparejamiento invalidada");
+				pairingStatus = PAIR_REQUEST; // volvemos a intentarlo?
+				mensaje_enviado=false;
+				terminar=false;
 //				//				ESP_ERROR_CHECK(esp_wifi_stop());
 //				//				vTaskDelay(100 / portTICK_PERIOD_MS);
 //				//				autopairing_init();
 //				//				vTaskDelay(timeOut / portTICK_PERIOD_MS);
 //				//				gotoSleep();
-//			}
-//		}
+			}
+		}
 		if(xQueueSend(cola_resultado_enviados,&resultado, ESPNOW_MAXDELAY) != pdTRUE)ESP_LOGW(TAG, "Send send queue fail");
 	}
 	//-----------------------------------------------------------------------------
