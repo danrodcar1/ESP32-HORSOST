@@ -3,6 +3,7 @@
 //------- C HEADERS ----------//
 #include "stdint.h"
 #include <string>
+#include <queue>
 // #include "string.h"
 //------- ESP32 HEADERS .- FREERTOS ----------//
 #include "freertos/FreeRTOS.h"
@@ -18,6 +19,7 @@
 #include "lwip/sys.h"
 #include "esp_netif.h"
 #include "esp_efuse.h"
+#include "esp_sleep.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_log.h"
@@ -93,6 +95,13 @@ static const char *TAG11 = "* nvs init";
 #define MAX_CONFIG_SIZE 64
 #endif
 
+typedef struct
+{
+	struct timeval sleep_enter_time;
+} struct_rtc;
+
+static RTC_DATA_ATTR struct_rtc rtcData;
+
 class AUTOpairing_t
 {
 	static AUTOpairing_t *this_object;
@@ -109,12 +118,7 @@ class AUTOpairing_t
 		struct_pairing data;
 		uint16_t config[MAX_CONFIG_SIZE]; // max config size
 	} struct_nvs;
-	typedef struct
-	{
-		struct timeval sleep_enter_time;
-	} struct_rtc;
 
-	static RTC_DATA_ATTR struct_rtc rtcData;
 	// Others control vars
 	int config_size; // check
 	int mensajes_sent;
@@ -126,10 +130,11 @@ class AUTOpairing_t
 	unsigned long start_time;
 	unsigned long previousMillis_scanChannel; // will store last time channel was scanned
 	bool esperando;
+	bool esperando_pan;
 	bool rtc_init;
 
-	void (*user_callback)(struct_espnow_rcv_msg *);
-
+	void (*user_callback_mqtt)(struct_espnow_rcv_msg *);
+	void (*user_callback_pan)(struct_espnow_rcv_msg *);
 	// User control vars
 	bool debug;
 	unsigned long timeOut;
@@ -150,6 +155,7 @@ public:
 		mensaje_enviado = false; // para saber cuando hay que dejar de enviar porque ya se hizo y estamos esperando confirmación
 		terminar = false;		 // para saber cuando hay que dejar de enviar porque ya se hizo y estamos esperando confirmación
 		esperando = false;
+		esperando_pan = false;
 		timeOutEnabled = true;
 		nvs_start = false;
 		rtc_init = false;
@@ -473,6 +479,7 @@ public:
 		timeOutEnabled = _enable;
 	}
 	//-----------------------------------------------------------
+
 	void set_channel(uint8_t _channel = 6) { espnow_channel = _channel; }
 	//-----------------------------------------------------------
 	void set_FLASH(bool _nvs_start = false) { nvs_start = _nvs_start; }
@@ -515,6 +522,9 @@ public:
 			case ESP_OK:
 				if (debug)
 					ESP_LOGI(TAG11, "Done");
+
+				if (nvsData.code1 == MAGIC_CODE1 && nvsData.data.channel == 0)
+					nvsData.code1 = INVALID_CODE;
 				break;
 			case ESP_ERR_NVS_NOT_FOUND:
 				if (debug)
@@ -552,7 +562,7 @@ public:
 		else
 		{
 			if (debug)
-				ESP_LOGI("TAG11", "Sin configuración en FLASH");
+				ESP_LOGI(TAG11, "Sin configuración en FLASH");
 			return false;
 		}
 	}
@@ -654,6 +664,14 @@ public:
 		cola_resultado_enviados = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(espnow_send_cb_t));
 
 		xSemaphoreGive(semaforo_listo);
+
+	ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000));
+
+	struct timeval now;
+	gettimeofday(&now, NULL);
+	int sleep_time_ms = (now.tv_sec - rtcData.sleep_enter_time.tv_sec) * 1000 + (now.tv_usec - rtcData.sleep_enter_time.tv_usec) / 1000;
+
+	if(debug) ESP_LOGI(TAG, "Wake up from timer. Time spent in deep sleep: %dms\n", sleep_time_ms);
 		if (nvsData.code1 == MAGIC_CODE1)
 		{
 			// recover information saved in NVS memory
@@ -711,8 +729,10 @@ public:
 			xSemaphoreGive(semaforo_envio);
 			vTaskDelay(40);
 		}
-		if (!emparejado())
+		else
+		{
 			start_connection_task();
+		}
 	}
 
 	//-------------------------------------------------------------------------
@@ -746,7 +766,7 @@ public:
 			if (pairingStatus == PAIR_PAIRED && mensaje_enviado) // será un mensaje a la pasarela, se podría comprobar la mac
 			{
 				mensaje_enviado = false;
-				if (terminar && !esperando)
+				if (terminar && !esperando && !esperando_pan)
 					gotoSleep();
 			}
 		}
@@ -765,6 +785,7 @@ public:
 				pairingStatus = PAIR_REQUEST; // volvemos a intentarlo?
 				mensaje_enviado = false;
 				terminar = false;
+				gotoSleep();
 				//				//				ESP_ERROR_CHECK(esp_wifi_stop());
 				//				//				vTaskDelay(100 / portTICK_PERIOD_MS);
 				//				//				autopairing_init();
@@ -785,6 +806,8 @@ public:
 		uint8_t *mac_addr = recv_info->src_addr;
 		uint8_t type = data[0];
 		uint8_t i;
+		uint8_t macB[6];
+		uint32_t old;
 		struct_pairing *punt = (struct_pairing *)data;
 		struct_espnow_rcv_msg *my_msg = (struct_espnow_rcv_msg *)malloc(sizeof(struct_espnow_rcv_msg));
 
@@ -800,12 +823,41 @@ public:
 		switch (type & MASK_MSG_TYPE)
 		{
 		case NODATA:
-			esperando = false;
-			if (debug)
-				ESP_LOGI(TAG8, "NO HAY MENSAJES MQTT");
+			if ((((type & MASK_PAN) >> PAN_OFFSET)) == 0)
+			{
+				esperando = false;
+				if (debug)
+					ESP_LOGI(TAG8, "NO HAY MENSAJES MQTT");
+			}
+			else
+			{
+				esperando_pan = false;
+				if (debug)
+					ESP_LOGI(TAG8, "NO HAY MENSAJES PAN");
+			}
+
 			if (debug)
 				ESP_LOGI(TAG8, "LIBERADO SEMAFORO ENVIO: NODATA");
 			xSemaphoreGive(semaforo_envio);
+
+			if (terminar && !esperando && !esperando_pan) gotoSleep();
+
+			break;
+		case PAN_DATA:
+			if (debug)
+				ESP_LOGI(TAG8, "Mensaje recibido PAN");
+			/*
+			Tratamiento de la información fuera de la rutina de mensajes recividos.
+			Utilizar colas.
+			*/
+			my_msg->payload = (char *)malloc(len - PAN_payload_offset + 1);
+			snprintf(my_msg->payload, len - PAN_payload_offset, "%s", (char *)data + PAN_payload_offset);
+			memcpy(my_msg->macAddr, data + PAN_MAC_offset, PAN_MAC_size);
+			memcpy((void *)&my_msg->ms_old, data + PAN_MSold_offset, PAN_MSold_size);
+			if (debug)
+				ESP_LOGI(TAG8, "LIBERADO SEMAFORO ENVIO: PAN_DATA");
+			xSemaphoreGive(semaforo_envio);
+			user_callback_pan(my_msg);
 			break;
 		case DATA:
 			if (debug)
@@ -818,9 +870,9 @@ public:
 			snprintf(my_msg->topic, i, "%s", (char *)data + 1);
 			snprintf(my_msg->payload, len - i, "%s", (char *)data + i + 1);
 			if (debug)
-				ESP_LOGI(TAG8, "LIBERADO SEMAFORO ENVIO: NODATA");
+				ESP_LOGI(TAG8, "LIBERADO SEMAFORO ENVIO: DATA");
 			xSemaphoreGive(semaforo_envio);
-			user_callback(my_msg);
+			user_callback_mqtt(my_msg);
 			//			mqtt_process_msg(my_msg);
 			break;
 		case PAIRING:
@@ -832,6 +884,7 @@ public:
 			peer.channel = punt->channel;
 			peer.ifidx = ESPNOW_WIFI_IF;
 			peer.encrypt = false;
+			
 			memcpy(peer.peer_addr, punt->macAddr, ESP_NOW_ETH_ALEN);
 			ESP_ERROR_CHECK(esp_now_add_peer(&peer));
 			memcpy(pairingData.macAddr, punt->macAddr, 6);
@@ -850,9 +903,14 @@ public:
 	}
 
 	//-----------------------------------------------------------
-	void set_callback(void (*_user_callback)(struct_espnow_rcv_msg *))
+	void set_mqtt_msg_callback(void (*_user_callback)(struct_espnow_rcv_msg *))
 	{
-		user_callback = _user_callback;
+		user_callback_mqtt = _user_callback;
+	}
+	//-----------------------------------------------------------
+	void set_pan_msg_callback(void (*_user_callback)(struct_espnow_rcv_msg *))
+	{
+		user_callback_pan = _user_callback;
 	}
 	//------------------------------------------------------------------------
 	void check_messages()
@@ -870,6 +928,7 @@ public:
 	bool espnow_send_check(char *mensaje, bool fin = true, uint8_t _msgType = DATA)
 	{
 		esperando = true;
+		esperando_pan = true;
 		timeOut += 500;
 		return espnow_send(mensaje, fin, _msgType | CHECK);
 	}
@@ -883,7 +942,7 @@ public:
 		if (xSemaphoreTake(semaforo_envio, 3000 / portTICK_PERIOD_MS) == pdFALSE)
 		{
 			ESP_LOGE(TAG3, "Error esperando a enviar");
-			// gotoSleep();
+			gotoSleep();
 			return ERROR_NOT_PAIRED;
 			// a dormir?
 		}
@@ -944,8 +1003,8 @@ public:
 		while (1)
 		{
 			if (xSemaphoreTake(semaforo_listo, 3000 / portTICK_PERIOD_MS))
-			{ 
-				ESP_LOGI(TAG,"LIBERANDO SEMAFORO CONEXION");
+			{
+				ESP_LOGI(TAG, "LIBERANDO SEMAFORO CONEXION");
 				return true;
 			}
 		}
@@ -956,12 +1015,12 @@ public:
 	void gotoSleep()
 	{
 		// get deep sleep enter time
-		//		gettimeofday(&rtcData.sleep_enter_time, NULL);
+		gettimeofday(&rtcData.sleep_enter_time, NULL);
 		// add some randomness to avoid collisions with multiple devices
 		if (debug)
 			ESP_LOGI(TAG7, "Apaga y vamonos");
 		// enter deep sleep
-		//	esp_deep_sleep_start();
+		esp_deep_sleep_start();
 	}
 	//---------------------------------------------------------
 	esp_err_t setup(void);
@@ -1056,7 +1115,7 @@ private:
 				ESP_ERROR_CHECK(esp_now_add_peer(&peer));
 
 				// set pairing data to send to the server
-				pairingData.msgType = PAIRING;
+				pairingData.msgType = PAIRING; //| ((panAddress << PAN_OFFSET) & MASK_PAN);
 				pairingData.id = ESPNOW_DEVICE;
 
 				// send request

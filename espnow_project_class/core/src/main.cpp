@@ -5,7 +5,6 @@
 extern "C"
 {
 	void app_main(void);
-	void mqtt_process_msg(struct_espnow_rcv_msg *my_msg);
 }
 
 #define LOG_LEVEL_LOCAL ESP_LOG_VERBOSE
@@ -35,6 +34,16 @@ typedef struct
 } struct_config;
 
 struct_config strConfig;
+
+void pan_process_msg(struct_espnow_rcv_msg *my_msg){
+	ESP_LOGI("* PAN process", "Mensaje PAN recibido");
+	ESP_LOGI("* PAN process", "Antiguedad mensaje (ms): %lu",my_msg->ms_old);
+	ESP_LOGI("* PAN process", "MAC: %02X:%02X:%02X:%02X:%02X:%02X", my_msg->macAddr[0], my_msg->macAddr[1], my_msg->macAddr[2], my_msg->macAddr[3], my_msg->macAddr[4], my_msg->macAddr[5]);
+	ESP_LOGI("* PAN process", "Payload: %s",my_msg->payload);
+	ESP_LOGI("* PAN process", "Mi PAN: %d", clienteAP.get_pan());
+	
+	free(my_msg->payload);
+}
 
 void mqtt_process_msg(struct_espnow_rcv_msg *my_msg)
 {
@@ -82,6 +91,7 @@ void app_main(void)
 	my_reads->length = lengthADC1_CHAN;
 	ESP_LOGI(TAG, "ADC Length = %d", lengthADC1_CHAN);
 	my_reads->adc_read = (struct_adcread *)malloc(my_reads->length * sizeof(struct_adcread));
+	my_reads->chn = (int *)malloc(lengthADC1_CHAN);
 	for (int i = 0; i < my_reads->length; i++)
 	{
 		my_reads->chn[i] = adc_channel[i];
@@ -93,11 +103,16 @@ void app_main(void)
 		for (int j = 0; j < FILTER_LEN; j++)
 			my_reads->adc_read[i].adc_buff[j] = 0;
 	}
+	
 	clienteAP.esp_set_https_update(FIRMWARE_UPGRADE_URL, ESP_WIFI_SSID, ESP_WIFI_PASS);
 	clienteAP.set_timeOut(strConfig.timeout, true); // tiempo máximo
 	clienteAP.set_deepSleep(strConfig.tsleep);		// tiempo dormido en segundos
+	ESP_LOGI("Config debug","Timeout = %d",strConfig.timeout);
+	ESP_LOGI("Config debug","Timeout = %d",strConfig.tsleep);
 	clienteAP.set_channel(6);						// canal donde empieza el scaneo
-	clienteAP.set_callback(mqtt_process_msg);		// por defecto a NULL -> no se llama a ninguna función
+	clienteAP.set_pan(2);
+	clienteAP.set_mqtt_msg_callback(mqtt_process_msg);		// por defecto a NULL -> no se llama a ninguna función
+	clienteAP.set_pan_msg_callback(pan_process_msg);
 	clienteAP.begin();
 
 	if (clienteAP.envio_disponible() == true)

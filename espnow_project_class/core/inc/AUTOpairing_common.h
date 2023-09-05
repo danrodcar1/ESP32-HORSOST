@@ -17,6 +17,7 @@
 #define PAN_DATA  0b00000010
 #define MASK_MSG_TYPE 0b00000011
 
+
 #define CANAL 6
 
 // PAN address
@@ -25,6 +26,12 @@
 
 // message flags
 #define CHECK   0b10000000
+#define RESERVED 0b01000000
+
+
+// network node types
+#define GATEWAY 0
+#define ESPNOW_DEVICE 1
 
 #define MAX_BUFF 100
 
@@ -37,6 +44,18 @@
 
 #define ESPNOW_MAXDELAY 512
 #define ESPNOW_QUEUE_SIZE           10
+
+// Para los mensajes PAN necesitamos también la MAC de origen uint8_t[6] y la edad del mensaje (uint32_t)
+// Van a estar así:
+//      tipo de mensaje (1byte)  |  MAC origen (6 bytes) | antiguedad ms (4 bytes) | cuerpo del mensaje (hasta completar 250 bytes) 
+#define PAN_type_offset  0
+#define PAN_MAC_offset   1
+#define PAN_MAC_size     6
+#define PAN_MSold_offset 7 //(1+6)
+#define PAN_MSold_size   4
+#define PAN_payload_offset 11 //(1+6+4)
+
+
 typedef enum
 {
     NO_UPDATE_FOUND,
@@ -67,6 +86,7 @@ typedef struct{
 	char *topic;
 	char *payload;
 	uint8_t macAddr[6];
+  unsigned long ms_old;
 }struct_espnow_rcv_msg;
 
 char * messType2String(uint8_t type)
@@ -112,7 +132,7 @@ long long dec2bin(int n) {
   return bin;
 }
 
-bool to_hex(char* dest, size_t dest_len, const uint8_t* values, size_t val_len) {
+bool to_hex(uint8_t* dest, size_t dest_len, const uint8_t* values, size_t val_len) {
     static const char hex_table[] = "0123456789ABCDEF";
     if(dest_len < (val_len*2+1)) /* check that dest is large enough */
         return false;
